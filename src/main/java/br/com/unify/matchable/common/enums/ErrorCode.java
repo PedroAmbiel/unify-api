@@ -1,0 +1,149 @@
+package br.com.unify.matchable.common.enums;
+
+public enum ErrorCode {
+
+    AUTH_INVALID_CREDENTIALS(
+            1001,
+            401,
+            "Credenciais inválidas"
+    ),
+
+    AUTH_UNAUTHORIZED(
+            1002,
+            401,
+            "Não autorizado"
+    ),
+
+    AUTH_FORBIDDEN(
+            1003,
+            403,
+            "Acesso negado"
+    ),
+
+    TOKEN_REFRESH_INVALID_OR_EXPIRED(
+            2001,
+            401,
+            "Token de refresh inválido ou expirado"
+    ),
+
+    TOKEN_ACCESS_INVALID_OR_EXPIRED(
+            2002,
+            401,
+            "Token de acesso inválido ou expirado"
+    ),
+
+    TOKEN_MALFORMED(
+            2003,
+            401,
+            "Token malformado ou inválido"
+    ),
+
+    VALIDATION_LOGIN_REQUIRED(
+            3001,
+            400,
+            "É necessário fornecer um login (email ou celular)"
+    ),
+
+    VALIDATION_PASSWORD_TOO_SHORT(
+            3002,
+            400,
+            "Senha deve ter pelo menos 8 caracteres"
+    ),
+
+    VALIDATION_SUBSCRIPTION_METHOD_REQUIRED(
+            3003,
+            400,
+            "Método de assinatura é obrigatório (EMAIL ou CELLPHONE)"
+    ),
+
+    VALIDATION_REQUIRED_FIELD_MISSING(
+            3004,
+            400,
+            "Campo obrigatório não fornecido"
+    ),
+
+    VALIDATION_INVALID_FORMAT(
+            3005,
+            400,
+            "Formato de entrada inválido"
+    ),
+
+    USER_NOT_FOUND(
+            4001,
+            404,
+            "Usuário não encontrado"
+    ),
+
+    USER_ALREADY_EXISTS(
+            4002,
+            409,
+            "Usuário já existe"
+    ),
+
+    USER_DISABLED(
+            4003,
+            403,
+            "Usuário desativado ou bloqueado"
+    ),
+
+    RESOURCE_NOT_FOUND(
+            5001,
+            404,
+            "Recurso não encontrado"
+    ),
+
+    RESOURCE_CONFLICT(
+            5002,
+            409,
+            "Conflito ao processar recurso"
+    ),
+
+    SYSTEM_INTERNAL_ERROR(
+            9001,
+            500,
+            "Erro interno do servidor"
+    ),
+
+    SYSTEM_OPERATION_NOT_SUPPORTED(
+            9002,
+            501,
+            "Operação não suportada"
+    ),
+
+    SYSTEM_SERVICE_UNAVAILABLE(
+            9003,
+            503,
+            "Serviço temporariamente indisponível"
+    );
+
+
+    private final int code;
+    private final int httpStatus;
+    private final String defaultMessage;
+
+    ErrorCode(int code, int httpStatus, String defaultMessage) {
+        this.code = code;
+        this.httpStatus = httpStatus;
+        this.defaultMessage = defaultMessage;
+    }
+
+    public int getCode() {
+        return code;
+    }
+
+    public int getHttpStatus() {
+        return httpStatus;
+    }
+
+    public String getDefaultMessage() {
+        return defaultMessage;
+    }
+
+    public String getMessage(String details) {
+        if (details == null || details.isBlank()) {
+            return defaultMessage;
+        }
+        return defaultMessage + ": " + details;
+    }
+}
+
