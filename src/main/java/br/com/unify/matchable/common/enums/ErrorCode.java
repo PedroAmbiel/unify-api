@@ -41,19 +41,13 @@ public enum ErrorCode {
     VALIDATION_LOGIN_REQUIRED(
             3001,
             400,
-            "É necessário fornecer um login (email ou celular)"
+            "É necessário fornecer um email"
     ),
 
     VALIDATION_PASSWORD_TOO_SHORT(
             3002,
             400,
             "Senha deve ter pelo menos 8 caracteres"
-    ),
-
-    VALIDATION_SUBSCRIPTION_METHOD_REQUIRED(
-            3003,
-            400,
-            "Método de assinatura é obrigatório (EMAIL ou CELLPHONE)"
     ),
 
     VALIDATION_REQUIRED_FIELD_MISSING(
@@ -66,6 +60,12 @@ public enum ErrorCode {
             3005,
             400,
             "Formato de entrada inválido"
+    ),
+
+    VALIDATION_VERIFICATION_CODE_REQUIRED(
+            3006,
+            400,
+            "Codigo de verificacao e obrigatorio"
     ),
 
     USER_NOT_FOUND(
@@ -84,6 +84,24 @@ public enum ErrorCode {
             4003,
             403,
             "Usuário desativado ou bloqueado"
+    ),
+
+    USER_EMAIL_NOT_VERIFIED(
+            4004,
+            403,
+            "Conta com verificacao de email pendente"
+    ),
+
+    USER_EMAIL_ALREADY_VERIFIED(
+            4005,
+            409,
+            "Conta ja verificada"
+    ),
+
+    USER_EMAIL_VERIFICATION_CODE_INVALID_OR_EXPIRED(
+            4006,
+            400,
+            "Codigo de verificacao invalido ou expirado"
     ),
 
     RESOURCE_NOT_FOUND(

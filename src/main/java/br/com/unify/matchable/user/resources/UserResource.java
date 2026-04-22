@@ -34,8 +34,7 @@ public class UserResource {
                 "name", user.name,
                 "lastName", user.lastName,
                 "email", user.email != null ? user.email : "",
-                "cellphone", user.cellphone != null ? user.cellphone : "",
-                "subscriptionMethod", user.subscriptionMethod.name()
+            "cellphone", user.cellphone != null ? user.cellphone : ""
         )).build();
     }
 }

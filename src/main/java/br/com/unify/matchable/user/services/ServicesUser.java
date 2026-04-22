@@ -7,5 +7,5 @@ public interface ServicesUser {
 
     User createUser(SignUpRequest request);
 
-    User findByLogin(String login);
+    User findByEmail(String email);
 }

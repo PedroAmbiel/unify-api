@@ -1,11 +1,16 @@
 package br.com.unify.matchable.auth.resources;
 
+import br.com.unify.matchable.auth.dto.EmailVerificationRequest;
 import br.com.unify.matchable.auth.dto.RefreshTokenRequest;
+import br.com.unify.matchable.auth.dto.ResendEmailVerificationRequest;
 import br.com.unify.matchable.auth.dto.SignInRequest;
 import br.com.unify.matchable.auth.dto.SignUpRequest;
 import br.com.unify.matchable.auth.dto.TokenResponse;
+import br.com.unify.matchable.auth.dto.VerificationCodeDispatchResponse;
+import br.com.unify.matchable.auth.services.EmailVerificationService;
 import br.com.unify.matchable.auth.services.TokenService;
 import br.com.unify.matchable.common.dto.ErrorResponse;
+import br.com.unify.matchable.common.dto.MessageResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.services.ServicesUser;
@@ -35,35 +40,29 @@ public class AuthResource {
     TokenService tokenService;
 
     @Inject
+    EmailVerificationService emailVerificationService;
+
+    @Inject
     JsonWebToken jwt;
 
     @POST
     @Path("/signup")
     @PermitAll
     @Transactional
-    public Response signUp(SignUpRequest request,
-                           @HeaderParam("User-Agent") String userAgent,
-                           @HeaderParam("X-Forwarded-For") String forwardedFor) {
-        if (request.login() == null || request.login().isBlank()) {
-            ErrorResponse error = ErrorResponse.of(ErrorCode.VALIDATION_LOGIN_REQUIRED);
-            return Response.status(error.code()).entity(error).build();
+    public Response signUp(SignUpRequest request) {
+        if (request.email() == null || request.email().isBlank()) {
+            return errorResponse(ErrorCode.VALIDATION_LOGIN_REQUIRED);
         }
         if (request.password() == null || request.password().length() < 8) {
-            ErrorResponse error = ErrorResponse.of(ErrorCode.VALIDATION_PASSWORD_TOO_SHORT);
-            return Response.status(error.code()).entity(error).build();
-        }
-        if (request.subscriptionMethod() == null) {
-            ErrorResponse error = ErrorResponse.of(ErrorCode.VALIDATION_SUBSCRIPTION_METHOD_REQUIRED);
-            return Response.status(error.code()).entity(error).build();
+            return errorResponse(ErrorCode.VALIDATION_PASSWORD_TOO_SHORT);
         }
 
         try {
             User user = servicesUser.createUser(request);
-            TokenResponse tokens = tokenService.generateTokens(user, userAgent, forwardedFor);
-            return Response.status(Response.Status.CREATED).entity(tokens).build();
+            VerificationCodeDispatchResponse verificationResponse = emailVerificationService.issueCode(user);
+            return Response.status(Response.Status.ACCEPTED).entity(verificationResponse).build();
         } catch (IllegalArgumentException e) {
-            ErrorResponse error = ErrorResponse.of(ErrorCode.USER_ALREADY_EXISTS, e.getMessage());
-            return Response.status(error.code()).entity(error).build();
+            return errorResponse(ErrorCode.USER_ALREADY_EXISTS, e.getMessage());
         }
     }
 
@@ -74,14 +73,63 @@ public class AuthResource {
     public Response signIn(SignInRequest request,
                            @HeaderParam("User-Agent") String userAgent,
                            @HeaderParam("X-Forwarded-For") String forwardedFor) {
-        User user = servicesUser.findByLogin(request.login());
+        User user = servicesUser.findByEmail(request.email());
         if (user == null || !BcryptUtil.matches(request.password(), user.password)) {
-            ErrorResponse error = ErrorResponse.of(ErrorCode.AUTH_INVALID_CREDENTIALS);
-            return Response.status(error.code()).entity(error).build();
+            return errorResponse(ErrorCode.AUTH_INVALID_CREDENTIALS);
+        }
+        if (emailVerificationService.requiresVerification(user)) {
+            return errorResponse(ErrorCode.USER_EMAIL_NOT_VERIFIED);
         }
 
         TokenResponse tokens = tokenService.generateTokens(user, userAgent, forwardedFor);
         return Response.ok(tokens).build();
+    }
+
+    @POST
+    @Path("/verify-email")
+    @PermitAll
+    @Transactional
+    public Response verifyEmail(EmailVerificationRequest request) {
+        if (request.email() == null || request.email().isBlank()) {
+            return errorResponse(ErrorCode.VALIDATION_LOGIN_REQUIRED);
+        }
+        if (request.code() == null || request.code().isBlank()) {
+            return errorResponse(ErrorCode.VALIDATION_VERIFICATION_CODE_REQUIRED);
+        }
+
+        User user = servicesUser.findByEmail(request.email());
+        if (user == null) {
+            return errorResponse(ErrorCode.USER_NOT_FOUND);
+        }
+        if (user.verified) {
+            return errorResponse(ErrorCode.USER_EMAIL_ALREADY_VERIFIED);
+        }
+        if (!emailVerificationService.verifyCode(user, request.code())) {
+            return errorResponse(ErrorCode.USER_EMAIL_VERIFICATION_CODE_INVALID_OR_EXPIRED);
+        }
+
+        return Response.ok(new MessageResponse("Email verificado com sucesso")).build();
+    }
+
+    @POST
+    @Path("/resend-email-verification")
+    @PermitAll
+    @Transactional
+    public Response resendEmailVerification(ResendEmailVerificationRequest request) {
+        if (request.email() == null || request.email().isBlank()) {
+            return errorResponse(ErrorCode.VALIDATION_LOGIN_REQUIRED);
+        }
+
+        User user = servicesUser.findByEmail(request.email());
+        if (user == null) {
+            return errorResponse(ErrorCode.USER_NOT_FOUND);
+        }
+        if (user.verified) {
+            return errorResponse(ErrorCode.USER_EMAIL_ALREADY_VERIFIED);
+        }
+
+        VerificationCodeDispatchResponse verificationResponse = emailVerificationService.issueCode(user);
+        return Response.accepted(verificationResponse).build();
     }
 
     @POST
@@ -93,8 +141,7 @@ public class AuthResource {
                             @HeaderParam("X-Forwarded-For") String forwardedFor) {
         TokenResponse tokens = tokenService.refreshTokens(request.refreshToken(), userAgent, forwardedFor);
         if (tokens == null) {
-            ErrorResponse error = ErrorResponse.of(ErrorCode.TOKEN_REFRESH_INVALID_OR_EXPIRED);
-            return Response.status(error.code()).entity(error).build();
+            return errorResponse(ErrorCode.TOKEN_REFRESH_INVALID_OR_EXPIRED);
         }
         return Response.ok(tokens).build();
     }
@@ -110,5 +157,17 @@ public class AuthResource {
             tokenService.revokeAllConnections(user);
         }
         return Response.noContent().build();
+    }
+
+    private Response errorResponse(ErrorCode errorCode) {
+        return Response.status(errorCode.getHttpStatus())
+                .entity(ErrorResponse.of(errorCode))
+                .build();
+    }
+
+    private Response errorResponse(ErrorCode errorCode, String details) {
+        return Response.status(errorCode.getHttpStatus())
+                .entity(ErrorResponse.of(errorCode, details))
+                .build();
     }
 }

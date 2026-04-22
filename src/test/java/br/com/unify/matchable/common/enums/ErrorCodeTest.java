@@ -147,7 +147,7 @@ class ErrorCodeTest {
     void testValidationErrorsReturn400() {
         assertEquals(400, ErrorCode.VALIDATION_LOGIN_REQUIRED.getHttpStatus());
         assertEquals(400, ErrorCode.VALIDATION_PASSWORD_TOO_SHORT.getHttpStatus());
-        assertEquals(400, ErrorCode.VALIDATION_SUBSCRIPTION_METHOD_REQUIRED.getHttpStatus());
+        assertEquals(400, ErrorCode.VALIDATION_VERIFICATION_CODE_REQUIRED.getHttpStatus());
     }
 
     @Test
@@ -162,6 +162,18 @@ class ErrorCodeTest {
     @DisplayName("USER_ALREADY_EXISTS deve retornar 409 Conflict")
     void testUserAlreadyExistsReturns409() {
         assertEquals(409, ErrorCode.USER_ALREADY_EXISTS.getHttpStatus());
+    }
+
+    @Test
+    @DisplayName("USER_EMAIL_NOT_VERIFIED deve retornar 403 Forbidden")
+    void testUserEmailNotVerifiedReturns403() {
+        assertEquals(403, ErrorCode.USER_EMAIL_NOT_VERIFIED.getHttpStatus());
+    }
+
+    @Test
+    @DisplayName("USER_EMAIL_VERIFICATION_CODE_INVALID_OR_EXPIRED deve retornar 400 Bad Request")
+    void testVerificationCodeInvalidReturns400() {
+        assertEquals(400, ErrorCode.USER_EMAIL_VERIFICATION_CODE_INVALID_OR_EXPIRED.getHttpStatus());
     }
 
     @Test

@@ -1,7 +1,7 @@
 package br.com.unify.matchable.auth.dto;
 
-public record SignInRequest(
+public record EmailVerificationRequest(
         String email,
-        String password
+        String code
 ) {
 }
