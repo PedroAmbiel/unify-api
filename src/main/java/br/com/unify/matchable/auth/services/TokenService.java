@@ -71,7 +71,7 @@ public class TokenService {
 
     private String generateAccessToken(User user) {
         return Jwt.issuer("https://unify.com.br")
-                .upn(user.id.toString())
+                .subject(user.id.toString())
                 .groups(Set.of("user"))
                 .claim("name", user.name)
                 .claim("lastName", user.lastName)
