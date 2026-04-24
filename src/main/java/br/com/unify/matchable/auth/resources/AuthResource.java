@@ -12,6 +12,8 @@ import br.com.unify.matchable.auth.services.TokenService;
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.dto.MessageResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
+import br.com.unify.matchable.common.validation.EmailValidator;
+import br.com.unify.matchable.common.validation.PasswordValidator;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.services.ServicesUser;
 import io.quarkus.elytron.security.common.BcryptUtil;
@@ -53,8 +55,14 @@ public class AuthResource {
         if (request.email() == null || request.email().isBlank()) {
             return errorResponse(ErrorCode.VALIDATION_LOGIN_REQUIRED);
         }
-        if (request.password() == null || request.password().length() < 8) {
+        if (!EmailValidator.isValid(request.email())) {
+            return errorResponse(ErrorCode.VALIDATION_INVALID_FORMAT, "email");
+        }
+        if (!PasswordValidator.hasMinimumLength(request.password())) {
             return errorResponse(ErrorCode.VALIDATION_PASSWORD_TOO_SHORT);
+        }
+        if (!PasswordValidator.isValid(request.password())) {
+            return errorResponse(ErrorCode.VALIDATION_INVALID_FORMAT, PasswordValidator.COMPLEXITY_REQUIREMENTS_MESSAGE);
         }
 
         try {
