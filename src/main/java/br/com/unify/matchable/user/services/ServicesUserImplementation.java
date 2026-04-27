@@ -30,6 +30,7 @@ public class ServicesUserImplementation implements ServicesUser {
         user.lastName = request.lastName();
         user.password = BcryptUtil.bcryptHash(request.password());
         user.email = request.email();
+        user.birthdate = request.birthdate();
         user.verified = false;
         user.lastUpdatedAt = Instant.now();
 

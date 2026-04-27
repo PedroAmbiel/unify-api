@@ -74,6 +74,12 @@ public enum ErrorCode {
             "Token de redefinicao de senha e obrigatorio"
     ),
 
+    VALIDATION_UNDERAGE_USER(
+            3008,
+            400,
+            "Usuario deve ter 18 anos ou mais"
+    ),
+
     USER_NOT_FOUND(
             4001,
             404,

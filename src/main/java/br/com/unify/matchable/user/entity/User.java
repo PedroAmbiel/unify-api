@@ -1,6 +1,7 @@
 package br.com.unify.matchable.user.entity;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,13 +39,16 @@ public class User extends PanacheEntityBase {
     @Column(name = "password", nullable = false)
     public String password;
 
+    @Column(name = "birthdate", nullable = false)
+    public LocalDate birthdate;
+
     @Column(name = "verified", nullable = false)
     public boolean verified;
 
     @Column(name = "last_updated_at", nullable = false)
     public Instant lastUpdatedAt;
 
-    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL)
     public UserProfile profile;
 
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)

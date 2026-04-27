@@ -33,10 +33,14 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.jwt.JsonWebToken;
 
+import java.time.LocalDate;
+
 @Path("/auth")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class AuthResource {
+
+    private static final int MINIMUM_SIGNUP_AGE = 18;
 
     private static final String PASSWORD_RESET_REQUEST_MESSAGE = "Caso o email esteja cadastrado, será enviado um email com um link de redefinição de senha";
 
@@ -63,6 +67,9 @@ public class AuthResource {
         if (request.email() == null || request.email().isBlank()) {
             return errorResponse(ErrorCode.VALIDATION_LOGIN_REQUIRED);
         }
+        if (request.birthdate() == null) {
+            return errorResponse(ErrorCode.VALIDATION_REQUIRED_FIELD_MISSING, "birthdate");
+        }
         if (!EmailValidator.isValid(request.email())) {
             return errorResponse(ErrorCode.VALIDATION_INVALID_FORMAT, "email");
         }
@@ -71,6 +78,9 @@ public class AuthResource {
         }
         if (!PasswordValidator.isValid(request.password())) {
             return errorResponse(ErrorCode.VALIDATION_INVALID_FORMAT, PasswordValidator.COMPLEXITY_REQUIREMENTS_MESSAGE);
+        }
+        if (!isAdult(request.birthdate())) {
+            return errorResponse(ErrorCode.VALIDATION_UNDERAGE_USER);
         }
 
         try {
@@ -219,5 +229,9 @@ public class AuthResource {
         return Response.status(errorCode.getHttpStatus())
                 .entity(ErrorResponse.of(errorCode, details))
                 .build();
+    }
+
+    private boolean isAdult(LocalDate birthdate) {
+        return !birthdate.isAfter(LocalDate.now().minusYears(MINIMUM_SIGNUP_AGE));
     }
 }
