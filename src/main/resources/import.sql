@@ -3,4 +3,5 @@
 -- Add seed data below as needed
 insert into 
     users(id, verified, last_updated_at, email, last_name, name, password)
-    values ('019dbf9a-5a8e-72de-85cb-8426b424c6fe', true, '2024-06-01T00:00:00Z', 'pedroam41@hotmail.com', 'Ambiel', 'Pedro', '$2a$10$h/o9ePGa7eizQNh6mFZN0.ZDHX0BW76wDDTBvzeq585bfX.Aa0HB.');
+    values ('019dbf9a-5a8e-72de-85cb-8426b424c6fe', true, '2024-06-01T00:00:00Z', 'teste@gmail.com', 'Ambiel', 'Pedro', '$2a$10$h/o9ePGa7eizQNh6mFZN0.ZDHX0BW76wDDTBvzeq585bfX.Aa0HB.'),
+    ('019dcfdc-fa72-722b-89ac-e331eb4f119a', false, '2024-06-01T00:00:00Z', 'verificar@gmail.com', 'Email', 'Verificar', '$2a$10$h/o9ePGa7eizQNh6mFZN0.ZDHX0BW76wDDTBvzeq585bfX.Aa0HB.');

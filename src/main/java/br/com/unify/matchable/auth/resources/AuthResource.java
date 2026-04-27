@@ -1,13 +1,16 @@
 package br.com.unify.matchable.auth.resources;
 
 import br.com.unify.matchable.auth.dto.EmailVerificationRequest;
+import br.com.unify.matchable.auth.dto.ForgotPasswordRequest;
 import br.com.unify.matchable.auth.dto.RefreshTokenRequest;
 import br.com.unify.matchable.auth.dto.ResendEmailVerificationRequest;
+import br.com.unify.matchable.auth.dto.ResetPasswordRequest;
 import br.com.unify.matchable.auth.dto.SignInRequest;
 import br.com.unify.matchable.auth.dto.SignUpRequest;
 import br.com.unify.matchable.auth.dto.TokenResponse;
 import br.com.unify.matchable.auth.dto.VerificationCodeDispatchResponse;
 import br.com.unify.matchable.auth.services.EmailVerificationService;
+import br.com.unify.matchable.auth.services.PasswordResetService;
 import br.com.unify.matchable.auth.services.TokenService;
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.dto.MessageResponse;
@@ -35,6 +38,8 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
 @Consumes(MediaType.APPLICATION_JSON)
 public class AuthResource {
 
+    private static final String PASSWORD_RESET_REQUEST_MESSAGE = "Caso o email esteja cadastrado, será enviado um email com um link de redefinição de senha";
+
     @Inject
     ServicesUser servicesUser;
 
@@ -43,6 +48,9 @@ public class AuthResource {
 
     @Inject
     EmailVerificationService emailVerificationService;
+
+    @Inject
+    PasswordResetService passwordResetService;
 
     @Inject
     JsonWebToken jwt;
@@ -138,6 +146,40 @@ public class AuthResource {
 
         VerificationCodeDispatchResponse verificationResponse = emailVerificationService.issueCode(user);
         return Response.accepted(verificationResponse).build();
+    }
+
+    @POST
+    @Path("/forgot-password")
+    @PermitAll
+    @Transactional
+    public Response forgotPassword(ForgotPasswordRequest request) {
+        if (request.email() == null || request.email().isBlank()) {
+            return errorResponse(ErrorCode.VALIDATION_LOGIN_REQUIRED);
+        }
+
+        passwordResetService.issueResetLink(request.email());
+        return Response.accepted(new MessageResponse(PASSWORD_RESET_REQUEST_MESSAGE)).build();
+    }
+
+    @POST
+    @Path("/reset-password")
+    @PermitAll
+    @Transactional
+    public Response resetPassword(ResetPasswordRequest request) {
+        if (request.token() == null || request.token().isBlank()) {
+            return errorResponse(ErrorCode.VALIDATION_PASSWORD_RESET_TOKEN_REQUIRED);
+        }
+        if (!PasswordValidator.hasMinimumLength(request.password())) {
+            return errorResponse(ErrorCode.VALIDATION_PASSWORD_TOO_SHORT);
+        }
+        if (!PasswordValidator.isValid(request.password())) {
+            return errorResponse(ErrorCode.VALIDATION_INVALID_FORMAT, PasswordValidator.COMPLEXITY_REQUIREMENTS_MESSAGE);
+        }
+        if (!passwordResetService.resetPassword(request.token(), request.password())) {
+            return errorResponse(ErrorCode.USER_PASSWORD_RESET_TOKEN_INVALID_OR_EXPIRED);
+        }
+
+        return Response.ok(new MessageResponse("Senha redefinida com sucesso")).build();
     }
 
     @POST

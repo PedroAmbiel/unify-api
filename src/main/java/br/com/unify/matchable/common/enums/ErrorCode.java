@@ -68,6 +68,12 @@ public enum ErrorCode {
             "Codigo de verificacao e obrigatorio"
     ),
 
+    VALIDATION_PASSWORD_RESET_TOKEN_REQUIRED(
+            3007,
+            400,
+            "Token de redefinicao de senha e obrigatorio"
+    ),
+
     USER_NOT_FOUND(
             4001,
             404,
@@ -102,6 +108,12 @@ public enum ErrorCode {
             4006,
             400,
             "Codigo de verificacao invalido ou expirado"
+    ),
+
+    USER_PASSWORD_RESET_TOKEN_INVALID_OR_EXPIRED(
+            4007,
+            400,
+            "Token de redefinicao de senha invalido ou expirado"
     ),
 
     RESOURCE_NOT_FOUND(

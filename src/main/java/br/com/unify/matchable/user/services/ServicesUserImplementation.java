@@ -42,6 +42,17 @@ public class ServicesUserImplementation implements ServicesUser {
         return User.findByEmail(email);
     }
 
+    @Override
+    public void updatePassword(User user, String password, Instant updatedAt) {
+        if (user == null) {
+            throw new IllegalArgumentException("Usuário não encontrado!");
+        }
+
+        validatePassword(password);
+        user.password = BcryptUtil.bcryptHash(password);
+        user.lastUpdatedAt = updatedAt;
+    }
+
     private void validatePassword(String password) {
         if (!PasswordValidator.hasMinimumLength(password)) {
             throw new ValidationException(
