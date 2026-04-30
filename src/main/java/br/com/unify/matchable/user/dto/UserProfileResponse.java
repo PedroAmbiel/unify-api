@@ -6,7 +6,6 @@ import java.util.UUID;
 public record UserProfileResponse(
         UUID id,
         String bio,
-        String avatarUrl,
         LookupOptionResponse gender,
         List<DisabilityOptionResponse> disabilities,
         List<LookupOptionResponse> accessibilityNeeds,

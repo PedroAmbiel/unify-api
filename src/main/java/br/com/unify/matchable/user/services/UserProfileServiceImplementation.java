@@ -72,7 +72,6 @@ public class UserProfileServiceImplementation implements UserProfileService {
 
         UserProfile profile = findOrCreateProfile(user);
         profile.bio = normalizeText(request.bio());
-        profile.avatarUrl = normalizeText(request.avatarUrl());
         profile.gender = resolveReference(request.genderId(), Gender.class, GENDER_FIELD);
         replaceSet(profile.disabilities, resolveReferenceSet(request.disabilityIds(), Disability.class, DISABILITY_FIELD));
         replaceSet(
@@ -353,7 +352,6 @@ public class UserProfileServiceImplementation implements UserProfileService {
         return new UserProfileResponse(
                 profile.id,
                 profile.bio,
-                profile.avatarUrl,
                 profile.gender == null ? null : toOption(profile.gender.id, profile.gender.description),
                 profile.disabilities.stream()
                         .map(disability -> new DisabilityOptionResponse(disability.id, disability.description, disability.ionicIcon))
@@ -396,7 +394,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
     }
 
     private UserProfileResponse emptyProfileResponse() {
-        return new UserProfileResponse(null, null, null, null, List.of(), List.of(), null, List.of(), List.of(), null, List.of(), null);
+        return new UserProfileResponse(null, null, null, null, List.of(), null, List.of(), List.of(), null, List.of(), null);
     }
 
     private UserMatchPreferencesResponse emptyMatchPreferencesResponse() {

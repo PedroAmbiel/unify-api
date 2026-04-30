@@ -4,7 +4,6 @@ import java.util.Set;
 
 public record UserProfileUpsertRequest(
         String bio,
-        String avatarUrl,
         Integer genderId,
         Set<Integer> disabilityIds,
         Set<Integer> accessibilityNeedIds,
