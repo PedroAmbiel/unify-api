@@ -52,6 +52,12 @@ public class UserMatchPreference extends PanacheEntityBase {
     @Column(name = "energy_level_similarity")
     public SimilarityPreference energyLevelSimilarity;
 
+    @Column(name = "min_age")
+    public Integer minAge;
+
+    @Column(name = "max_age")
+    public Integer maxAge;
+
     @Column(name = "max_match_distance_km")
     public Integer maxMatchDistanceKm;
 

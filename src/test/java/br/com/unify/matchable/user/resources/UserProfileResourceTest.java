@@ -60,7 +60,6 @@ class UserProfileResourceTest {
         service.profileResponse = new UserProfileResponse(
                 UUID.randomUUID(),
                 "Bio em português",
-                "https://cdn.exemplo/avatar.png",
                 new LookupOptionResponse(1, "Mulher"),
                 List.of(new DisabilityOptionResponse(1, "Física", "walk-outline")),
                 List.of(),
@@ -78,7 +77,6 @@ class UserProfileResourceTest {
 
         UserProfileUpsertRequest request = new UserProfileUpsertRequest(
                 "Bio em português",
-                "https://cdn.exemplo/avatar.png",
                 1,
                 Set.of(1),
                 Set.of(),
@@ -111,7 +109,6 @@ class UserProfileResourceTest {
 
         Response response = resource.saveProfile(new UserProfileUpsertRequest(
                 null,
-                null,
                 99,
                 Set.of(),
                 Set.of(),
@@ -139,6 +136,8 @@ class UserProfileResourceTest {
                 null,
                 "SIMILAR",
                 null,
+            25,
+            35,
                 30,
                 List.of(new LookupOptionResponse(1, "Mulher"))
         );
@@ -153,6 +152,8 @@ class UserProfileResourceTest {
                 null,
                 SimilarityPreference.SIMILAR,
                 null,
+            25,
+            35,
                 30,
                 Set.of(1)
         );
@@ -162,8 +163,39 @@ class UserProfileResourceTest {
         assertEquals(200, response.getStatus());
         assertSame(request, service.capturedMatchPreferencesRequest);
         UserMatchPreferencesResponse body = assertInstanceOf(UserMatchPreferencesResponse.class, response.getEntity());
+        assertEquals(25, body.minAge());
+        assertEquals(35, body.maxAge());
         assertEquals(30, body.maxMatchDistanceKm());
         assertEquals("Amizade", body.connectionType().description());
+    }
+
+    @Test
+    void saveMatchPreferencesReturnsValidationErrorWhenServiceRejectsAgeRange() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.matchPreferencesException = new IllegalArgumentException(
+                "A idade mínima desejada não pode ser maior que a idade máxima desejada"
+        );
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.saveMatchPreferences(new UserMatchPreferencesUpsertRequest(
+                1,
+                SimilarityPreference.ANY,
+                null,
+                SimilarityPreference.SIMILAR,
+                null,
+                40,
+                30,
+                20,
+                Set.of(1)
+        ));
+
+        assertEquals(400, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("VALIDATION_INVALID_FORMAT", body.error());
+        assertTrue(body.message().contains("idade mínima desejada"));
     }
 
     @Test
@@ -205,6 +237,7 @@ class UserProfileResourceTest {
         private UserMatchPreferencesResponse matchPreferencesResponse;
         private ProfileCompletionResponse completionResponse;
         private IllegalArgumentException profileException;
+        private IllegalArgumentException matchPreferencesException;
 
         @Override
         public UserProfileResponse getProfile(User user) {
@@ -232,6 +265,9 @@ class UserProfileResourceTest {
         public UserMatchPreferencesResponse saveMatchPreferences(User user, UserMatchPreferencesUpsertRequest request) {
             this.capturedUser = user;
             this.capturedMatchPreferencesRequest = request;
+            if (matchPreferencesException != null) {
+                throw matchPreferencesException;
+            }
             return matchPreferencesResponse;
         }
 

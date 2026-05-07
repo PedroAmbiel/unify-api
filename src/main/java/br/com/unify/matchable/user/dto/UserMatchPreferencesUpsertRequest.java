@@ -10,6 +10,8 @@ public record UserMatchPreferencesUpsertRequest(
         SimilarityPreference autonomyCompatibility,
         SimilarityPreference lifestyleSimilarity,
         SimilarityPreference energyLevelSimilarity,
+        Integer minAge,
+        Integer maxAge,
         Integer maxMatchDistanceKm,
         Set<Integer> desiredGenderIds
 ) {

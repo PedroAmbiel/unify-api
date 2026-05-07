@@ -40,6 +40,8 @@ import jakarta.transaction.Transactional;
 @ApplicationScoped
 public class UserProfileServiceImplementation implements UserProfileService {
 
+    private static final int MINIMUM_PREFERRED_AGE = 18;
+
     private static final String GENDER_FIELD = "gênero";
     private static final String DISABILITY_FIELD = "tipo de deficiência";
     private static final String ACCESSIBILITY_NEED_FIELD = "necessidade de acessibilidade";
@@ -122,6 +124,11 @@ public class UserProfileServiceImplementation implements UserProfileService {
         preference.autonomyCompatibility = request.autonomyCompatibility();
         preference.lifestyleSimilarity = request.lifestyleSimilarity();
         preference.energyLevelSimilarity = request.energyLevelSimilarity();
+        Integer minAge = validatePreferredAge(request.minAge(), "A idade mínima desejada");
+        Integer maxAge = validatePreferredAge(request.maxAge(), "A idade máxima desejada");
+        validateAgeRange(minAge, maxAge);
+        preference.minAge = minAge;
+        preference.maxAge = maxAge;
         preference.maxMatchDistanceKm = validateMaxDistance(request.maxMatchDistanceKm());
         replaceSet(preference.desiredGenders, resolveReferenceSet(request.desiredGenderIds(), Gender.class, DESIRED_GENDER_FIELD));
 
@@ -305,6 +312,22 @@ public class UserProfileServiceImplementation implements UserProfileService {
         return maxMatchDistanceKm;
     }
 
+    private Integer validatePreferredAge(Integer age, String fieldLabel) {
+        if (age == null) {
+            return null;
+        }
+        if (age < MINIMUM_PREFERRED_AGE) {
+            throw new IllegalArgumentException(fieldLabel + " deve ser maior ou igual a " + MINIMUM_PREFERRED_AGE);
+        }
+        return age;
+    }
+
+    private void validateAgeRange(Integer minAge, Integer maxAge) {
+        if (minAge != null && maxAge != null && minAge > maxAge) {
+            throw new IllegalArgumentException("A idade mínima desejada não pode ser maior que a idade máxima desejada");
+        }
+    }
+
     private <T> T resolveReference(Integer id, Class<T> entityType, String fieldLabel) {
         if (id == null) {
             return null;
@@ -382,6 +405,8 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 preference.autonomyCompatibility == null ? null : preference.autonomyCompatibility.name(),
                 preference.lifestyleSimilarity == null ? null : preference.lifestyleSimilarity.name(),
                 preference.energyLevelSimilarity == null ? null : preference.energyLevelSimilarity.name(),
+                preference.minAge,
+                preference.maxAge,
                 preference.maxMatchDistanceKm,
                 preference.desiredGenders.stream()
                         .map(gender -> toOption(gender.id, gender.description))
@@ -398,6 +423,6 @@ public class UserProfileServiceImplementation implements UserProfileService {
     }
 
     private UserMatchPreferencesResponse emptyMatchPreferencesResponse() {
-        return new UserMatchPreferencesResponse(null, null, null, null, null, null, null, List.of());
+        return new UserMatchPreferencesResponse(null, null, null, null, null, null, null, null, null, List.of());
     }
 }

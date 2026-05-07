@@ -10,6 +10,8 @@ public record UserMatchPreferencesResponse(
         String autonomyCompatibility,
         String lifestyleSimilarity,
         String energyLevelSimilarity,
+        Integer minAge,
+        Integer maxAge,
         Integer maxMatchDistanceKm,
         List<LookupOptionResponse> desiredGenders
 ) {
