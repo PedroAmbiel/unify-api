@@ -6,6 +6,14 @@ create unique index if not exists uq_user_coordinates_active_profile
     on user_coordinates (fk_user_profile)
     where active = true;
 
+create unique index if not exists uq_user_profile_images_active_profile_pic
+    on user_profile_images (fk_user_profile)
+    where active = true and is_profile_pic = true;
+
+create index if not exists idx_user_profile_images_active_gallery
+    on user_profile_images (fk_user_profile, id desc)
+    where active = true and is_profile_pic = false;
+
 insert into genders(id, description)
 values (1, 'Mulher'),
        (2, 'Homem'),
@@ -63,5 +71,5 @@ values (1, 'Amizade'),
 
 insert into 
     users(id, verified, last_updated_at, birthdate, email, last_name, name, password)
-    values ('019dbf9a-5a8e-72de-85cb-8426b424c6fe', true, '2024-06-01T00:00:00Z', '1995-04-15', 'teste@gmail.com', 'Ambiel', 'Pedro', '$2a$10$h/o9ePGa7eizQNh6mFZN0.ZDHX0BW76wDDTBvzeq585bfX.Aa0HB.'),
-    ('019dcfdc-fa72-722b-89ac-e331eb4f119a', false, '2024-06-01T00:00:00Z', '1998-11-08', 'verificar@gmail.com', 'Email', 'Verificar', '$2a$10$h/o9ePGa7eizQNh6mFZN0.ZDHX0BW76wDDTBvzeq585bfX.Aa0HB.');
+    values ('019dbf9a-5a8e-72de-85cb-8426b424c6fe', true, '2024-06-01T00:00:00Z', '1995-04-15', 'teste@gmail.com', 'Ambiel', 'Pedro', '$2a$10$YaiH0J4eVMU6kjtG5pm.oeOxPRPCk1ZX.XjKrXZOqEdhQv1bbo8KG'),
+    ('019dcfdc-fa72-722b-89ac-e331eb4f119a', false, '2024-06-01T00:00:00Z', '1998-11-08', 'verificar@gmail.com', 'Email', 'Verificar', '$2a$10$YaiH0J4eVMU6kjtG5pm.oeOxPRPCk1ZX.XjKrXZOqEdhQv1bbo8KG');

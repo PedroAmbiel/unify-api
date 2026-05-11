@@ -1,5 +1,6 @@
 package br.com.unify.matchable.user.resources;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -7,10 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.jboss.resteasy.reactive.multipart.FileUpload;
 
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.user.dto.DisabilityOptionResponse;
@@ -19,6 +22,8 @@ import br.com.unify.matchable.user.dto.LookupOptionResponse;
 import br.com.unify.matchable.user.dto.ProfileCompletionResponse;
 import br.com.unify.matchable.user.dto.ProfileOptionsResponse;
 import br.com.unify.matchable.user.dto.SimilarityOptionResponse;
+import br.com.unify.matchable.user.dto.UserProfileImageResponse;
+import br.com.unify.matchable.user.dto.UserProfileImagesResponse;
 import br.com.unify.matchable.user.dto.UserMatchPreferencesResponse;
 import br.com.unify.matchable.user.dto.UserMatchPreferencesUpsertRequest;
 import br.com.unify.matchable.user.dto.UserProfileResponse;
@@ -59,6 +64,9 @@ class UserProfileResourceTest {
         StubUserProfileService service = new StubUserProfileService();
         service.profileResponse = new UserProfileResponse(
                 UUID.randomUUID(),
+            "Pedro",
+            "Ambiel",
+            31,
                 "Bio em português",
                 new LookupOptionResponse(1, "Mulher"),
                 List.of(new DisabilityOptionResponse(1, "Física", "walk-outline")),
@@ -68,7 +76,9 @@ class UserProfileResourceTest {
                 List.of(new LookupOptionResponse(1, "Caseiro")),
                 null,
                 List.of(new LookupOptionResponse(1, "Tecnologia")),
-                null
+                null,
+                null,
+                List.of()
         );
 
         TestableUserProfileResource resource = new TestableUserProfileResource();
@@ -136,8 +146,8 @@ class UserProfileResourceTest {
                 null,
                 "SIMILAR",
                 null,
-            25,
-            35,
+                25,
+                35,
                 30,
                 List.of(new LookupOptionResponse(1, "Mulher"))
         );
@@ -152,8 +162,8 @@ class UserProfileResourceTest {
                 null,
                 SimilarityPreference.SIMILAR,
                 null,
-            25,
-            35,
+                25,
+                35,
                 30,
                 Set.of(1)
         );
@@ -213,6 +223,80 @@ class UserProfileResourceTest {
         assertNull(service.capturedUser);
     }
 
+    @Test
+    void uploadProfilePictureReturnsSavedImagesPayload() {
+        StubUserProfileService service = new StubUserProfileService();
+        UUID imageId = UUID.randomUUID();
+        service.imagesResponse = new UserProfileImagesResponse(
+                new UserProfileImageResponse(imageId, true, true, "/users/me/profile/images/" + imageId),
+                List.of()
+        );
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+        resource.nextUploadedBytes = new byte[] { 1, 2, 3 };
+
+        Response response = resource.uploadProfilePicture(null);
+
+        assertEquals(200, response.getStatus());
+        assertArrayEquals(new byte[] { 1, 2, 3 }, service.capturedImageBytes);
+        UserProfileImagesResponse body = assertInstanceOf(UserProfileImagesResponse.class, response.getEntity());
+        assertEquals(imageId, body.profilePicture().id());
+    }
+
+    @Test
+    void uploadGalleryImageReturnsConflictWhenServiceRejectsLimit() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.imageConflict = new IllegalStateException("Limite de 5 imagens ativas no carrossel atingido");
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+        resource.nextUploadedBytes = new byte[] { 9, 9, 9 };
+
+        Response response = resource.uploadGalleryImage(null);
+
+        assertEquals(409, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("RESOURCE_CONFLICT", body.error());
+        assertTrue(body.message().contains("Limite de 5 imagens"));
+    }
+
+    @Test
+    void deactivateImageReturnsNotFoundWhenImageDoesNotBelongToUser() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.imageNotFound = new NoSuchElementException("Imagem não encontrada");
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.deactivateImage(UUID.randomUUID());
+
+        assertEquals(404, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("RESOURCE_NOT_FOUND", body.error());
+    }
+
+    @Test
+    void getProfileImageReturnsStoredBytes() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.imageContent = new byte[] { 4, 5, 6 };
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+        UUID imageId = UUID.randomUUID();
+
+        Response response = resource.getProfileImage(imageId);
+
+        assertEquals(200, response.getStatus());
+        assertEquals("image/jpeg", response.getMediaType().toString());
+        assertArrayEquals(new byte[] { 4, 5, 6 }, assertInstanceOf(byte[].class, response.getEntity()));
+        assertEquals(imageId, service.capturedImageId);
+    }
+
     private User buildUser() {
         User user = new User();
         user.id = UUID.randomUUID();
@@ -222,10 +306,16 @@ class UserProfileResourceTest {
 
     private static final class TestableUserProfileResource extends UserProfileResource {
         private User currentUser;
+        private byte[] nextUploadedBytes;
 
         @Override
         protected User findCurrentUser() {
             return currentUser;
+        }
+
+        @Override
+        protected byte[] readUploadedBytes(FileUpload image) {
+            return nextUploadedBytes;
         }
     }
 
@@ -233,11 +323,17 @@ class UserProfileResourceTest {
         private User capturedUser;
         private UserProfileUpsertRequest capturedProfileRequest;
         private UserMatchPreferencesUpsertRequest capturedMatchPreferencesRequest;
+        private byte[] capturedImageBytes;
+        private UUID capturedImageId;
         private UserProfileResponse profileResponse;
         private UserMatchPreferencesResponse matchPreferencesResponse;
         private ProfileCompletionResponse completionResponse;
+        private UserProfileImagesResponse imagesResponse;
+        private byte[] imageContent;
         private IllegalArgumentException profileException;
         private IllegalArgumentException matchPreferencesException;
+        private IllegalStateException imageConflict;
+        private NoSuchElementException imageNotFound;
 
         @Override
         public UserProfileResponse getProfile(User user) {
@@ -291,6 +387,52 @@ class UserProfileResourceTest {
                     List.of(new LookupOptionResponse(1, "Amizade")),
                     List.of(new SimilarityOptionResponse("ANY", "Indiferente"))
             );
+        }
+
+        @Override
+        public UserProfileImagesResponse getActiveImages(User user) {
+            this.capturedUser = user;
+            return imagesResponse;
+        }
+
+        @Override
+        public UserProfileImagesResponse uploadProfilePicture(User user, byte[] imageBytes) {
+            this.capturedUser = user;
+            this.capturedImageBytes = imageBytes;
+            if (imageConflict != null) {
+                throw imageConflict;
+            }
+            return imagesResponse;
+        }
+
+        @Override
+        public UserProfileImagesResponse uploadGalleryImage(User user, byte[] imageBytes) {
+            this.capturedUser = user;
+            this.capturedImageBytes = imageBytes;
+            if (imageConflict != null) {
+                throw imageConflict;
+            }
+            return imagesResponse;
+        }
+
+        @Override
+        public UserProfileImagesResponse deactivateImage(User user, UUID imageId) {
+            this.capturedUser = user;
+            this.capturedImageId = imageId;
+            if (imageNotFound != null) {
+                throw imageNotFound;
+            }
+            return imagesResponse;
+        }
+
+        @Override
+        public byte[] getImageContent(User user, UUID imageId) {
+            this.capturedUser = user;
+            this.capturedImageId = imageId;
+            if (imageNotFound != null) {
+                throw imageNotFound;
+            }
+            return imageContent;
         }
     }
 }

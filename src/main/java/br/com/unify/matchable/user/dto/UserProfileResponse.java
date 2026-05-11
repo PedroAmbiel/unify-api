@@ -5,6 +5,9 @@ import java.util.UUID;
 
 public record UserProfileResponse(
         UUID id,
+        String name,
+        String lastName,
+        Integer age,
         String bio,
         LookupOptionResponse gender,
         List<DisabilityOptionResponse> disabilities,
@@ -14,6 +17,8 @@ public record UserProfileResponse(
         List<LookupOptionResponse> lifestyleTypes,
         LookupOptionResponse energyLevel,
         List<LookupOptionResponse> interestTypes,
-        LocationResponse activeLocation
+        LocationResponse activeLocation,
+        UserProfileImageResponse profilePicture,
+        List<UserProfileImageResponse> galleryImages
 ) {
 }

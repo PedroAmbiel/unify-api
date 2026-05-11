@@ -97,6 +97,10 @@ public class UserProfile extends PanacheEntityBase {
     @OrderBy("id desc")
     public List<UserCoordinates> coordinates = new ArrayList<>();
 
+    @OneToMany(mappedBy = "userProfile", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @OrderBy("id desc")
+    public List<UserProfileImage> images = new ArrayList<>();
+
     @OneToOne(mappedBy = "userProfile", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     public UserMatchPreference matchPreference;
 

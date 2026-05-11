@@ -1,9 +1,23 @@
 package br.com.unify.matchable.user.services;
 
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.sql.SQLException;
+import java.time.LocalDate;
+import java.time.Period;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.UUID;
+
+import javax.imageio.ImageIO;
+import javax.sql.rowset.serial.SerialBlob;
 
 import br.com.unify.matchable.common.UUIDv7Generator;
 import br.com.unify.matchable.user.dto.DisabilityOptionResponse;
@@ -13,6 +27,8 @@ import br.com.unify.matchable.user.dto.LookupOptionResponse;
 import br.com.unify.matchable.user.dto.ProfileCompletionResponse;
 import br.com.unify.matchable.user.dto.ProfileOptionsResponse;
 import br.com.unify.matchable.user.dto.SimilarityOptionResponse;
+import br.com.unify.matchable.user.dto.UserProfileImageResponse;
+import br.com.unify.matchable.user.dto.UserProfileImagesResponse;
 import br.com.unify.matchable.user.dto.UserMatchPreferencesResponse;
 import br.com.unify.matchable.user.dto.UserMatchPreferencesUpsertRequest;
 import br.com.unify.matchable.user.dto.UserProfileResponse;
@@ -30,17 +46,23 @@ import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserCoordinates;
 import br.com.unify.matchable.user.entity.UserMatchPreference;
 import br.com.unify.matchable.user.entity.UserProfile;
+import br.com.unify.matchable.user.entity.UserProfileImage;
 import br.com.unify.matchable.user.enums.SimilarityPreference;
 import io.quarkus.panache.common.Sort;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
+import net.coobird.thumbnailator.Thumbnails;
 
 @ApplicationScoped
 public class UserProfileServiceImplementation implements UserProfileService {
 
     private static final int MINIMUM_PREFERRED_AGE = 18;
+    private static final int MAX_ACTIVE_GALLERY_IMAGES = 5;
+    private static final double IMAGE_OUTPUT_QUALITY = 0.85d;
+    private static final String IMAGE_NOT_FOUND_MESSAGE = "Imagem não encontrada";
+    private static final String IMAGE_DOWNLOAD_URL_PREFIX = "/users/me/profile/images/";
 
     private static final String GENDER_FIELD = "gênero";
     private static final String DISABILITY_FIELD = "tipo de deficiência";
@@ -236,6 +258,76 @@ public class UserProfileServiceImplementation implements UserProfileService {
         );
     }
 
+    @Override
+    public UserProfileImagesResponse getActiveImages(User user) {
+        UserProfile profile = UserProfile.findByUser(user);
+        if (profile == null) {
+            return emptyImagesResponse();
+        }
+        return toImagesResponse(profile);
+    }
+
+    @Override
+    @Transactional
+    public UserProfileImagesResponse uploadProfilePicture(User user, byte[] imageBytes) {
+        UserProfile profile = findOrCreateProfile(user);
+        ensureProfilePersisted(profile);
+
+        byte[] compressedImage = compressImage(imageBytes);
+        deactivateCurrentProfilePicture(profile);
+        createImage(profile, compressedImage, true);
+        return toImagesResponse(profile);
+    }
+
+    @Override
+    @Transactional
+    public UserProfileImagesResponse uploadGalleryImage(User user, byte[] imageBytes) {
+        UserProfile profile = findOrCreateProfile(user);
+        ensureProfilePersisted(profile);
+
+        if (UserProfileImage.countActiveGalleryImages(profile) >= MAX_ACTIVE_GALLERY_IMAGES) {
+            throw new IllegalStateException(
+                    "Limite de 5 imagens ativas no carrossel atingido. Desative uma imagem antes de enviar outra"
+            );
+        }
+
+        byte[] compressedImage = compressImage(imageBytes);
+        createImage(profile, compressedImage, false);
+        return toImagesResponse(profile);
+    }
+
+    @Override
+    @Transactional
+    public UserProfileImagesResponse deactivateImage(User user, UUID imageId) {
+        UserProfile profile = UserProfile.findByUser(user);
+        if (profile == null) {
+            throw new NoSuchElementException(IMAGE_NOT_FOUND_MESSAGE);
+        }
+
+        UserProfileImage image = UserProfileImage.findByIdAndUserProfile(imageId, profile);
+        if (image == null) {
+            throw new NoSuchElementException(IMAGE_NOT_FOUND_MESSAGE);
+        }
+
+        image.active = false;
+        return toImagesResponse(profile);
+    }
+
+    @Override
+    public byte[] getImageContent(User user, UUID imageId) {
+        UserProfile profile = UserProfile.findByUser(user);
+        if (profile == null) {
+            throw new NoSuchElementException(IMAGE_NOT_FOUND_MESSAGE);
+        }
+
+        UserProfileImage image = UserProfileImage.findActiveByIdAndUserProfile(imageId, profile);
+        if (image == null) {
+            throw new NoSuchElementException(IMAGE_NOT_FOUND_MESSAGE);
+        }
+
+        return readStoredImage(image);
+    }
+
     private UserProfile findOrCreateProfile(User user) {
         UserProfile profile = UserProfile.findByUser(user);
         if (profile != null) {
@@ -268,7 +360,30 @@ public class UserProfileServiceImplementation implements UserProfileService {
         }
     }
 
+    private void deactivateCurrentProfilePicture(UserProfile profile) {
+        UserProfileImage currentProfilePicture = UserProfileImage.findActiveProfilePicture(profile);
+        if (currentProfilePicture != null) {
+            currentProfilePicture.active = false;
+        }
+    }
+
+    private void createImage(UserProfile profile, byte[] compressedImage, boolean profilePicture) {
+        try {
+            UserProfileImage image = new UserProfileImage();
+            image.id = UUIDv7Generator.generate();
+            image.userProfile = profile;
+            image.oid = new SerialBlob(compressedImage);
+            image.profilePicture = profilePicture;
+            image.active = true;
+            image.persist();
+            profile.images.add(0, image);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Não foi possível preparar a imagem para armazenamento", exception);
+        }
+    }
+
     private void replaceActiveLocation(UserProfile profile, LocationRequest location) {
+        boolean hadActiveCoordinate = profile.coordinates.stream().anyMatch(coordinate -> coordinate.active);
         profile.coordinates.forEach(coordinate -> coordinate.active = false);
 
         if (location == null) {
@@ -280,6 +395,11 @@ public class UserProfileServiceImplementation implements UserProfileService {
 
         validateLatitude(location.latitude());
         validateLongitude(location.longitude());
+
+        if (hadActiveCoordinate) {
+            // Flush the deactivation first so the partial unique index sees only one active coordinate.
+            entityManager.flush();
+        }
 
         UserCoordinates coordinate = new UserCoordinates();
         coordinate.id = UUIDv7Generator.generate();
@@ -370,10 +490,60 @@ public class UserProfileServiceImplementation implements UserProfileService {
         return normalized.isEmpty() ? null : normalized;
     }
 
+    private byte[] compressImage(byte[] imageBytes) {
+        if (imageBytes == null || imageBytes.length == 0) {
+            throw new IllegalArgumentException("Nenhuma imagem foi enviada no campo 'image'");
+        }
+
+        try (ByteArrayInputStream inputStream = new ByteArrayInputStream(imageBytes);
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            BufferedImage sourceImage = ImageIO.read(inputStream);
+            if (sourceImage == null) {
+                throw new IllegalArgumentException("O arquivo enviado não é uma imagem JPEG ou PNG válida");
+            }
+
+            Thumbnails.of(normalizeImage(sourceImage))
+                    .scale(1.0d)
+                    .outputFormat("jpg")
+                    .outputQuality(IMAGE_OUTPUT_QUALITY)
+                    .toOutputStream(outputStream);
+
+            return outputStream.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Não foi possível processar a imagem enviada", exception);
+        }
+    }
+
+    private BufferedImage normalizeImage(BufferedImage sourceImage) {
+        if (!sourceImage.getColorModel().hasAlpha()) {
+            return sourceImage;
+        }
+
+        BufferedImage normalized = new BufferedImage(sourceImage.getWidth(), sourceImage.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = normalized.createGraphics();
+        graphics.setColor(Color.WHITE);
+        graphics.fillRect(0, 0, normalized.getWidth(), normalized.getHeight());
+        graphics.drawImage(sourceImage, 0, 0, null);
+        graphics.dispose();
+        return normalized;
+    }
+
+    private byte[] readStoredImage(UserProfileImage image) {
+        try {
+            return image.oid.getBytes(1, (int) image.oid.length());
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Não foi possível ler a imagem armazenada", exception);
+        }
+    }
+
     private UserProfileResponse toProfileResponse(UserProfile profile) {
         UserCoordinates activeCoordinate = profile.getActiveCoordinate();
+        UserProfileImagesResponse imagesResponse = toImagesResponse(profile);
         return new UserProfileResponse(
                 profile.id,
+            profile.user == null ? null : profile.user.name,
+            profile.user == null ? null : profile.user.lastName,
+            calculateAge(profile.user),
                 profile.bio,
                 profile.gender == null ? null : toOption(profile.gender.id, profile.gender.description),
                 profile.disabilities.stream()
@@ -393,9 +563,43 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 profile.interestTypes.stream()
                         .map(type -> toOption(type.id, type.description))
                         .toList(),
-                activeCoordinate == null ? null : new LocationResponse(activeCoordinate.latitude, activeCoordinate.longitude, activeCoordinate.active)
+                activeCoordinate == null ? null : new LocationResponse(activeCoordinate.latitude, activeCoordinate.longitude, activeCoordinate.active),
+                imagesResponse.profilePicture(),
+                imagesResponse.galleryImages()
         );
     }
+
+    private Integer calculateAge(User user) {
+        if (user == null || user.birthdate == null) {
+            return null;
+        }
+
+        LocalDate today = LocalDate.now();
+        if (user.birthdate.isAfter(today)) {
+            return null;
+        }
+
+        return Period.between(user.birthdate, today).getYears();
+    }
+
+            private UserProfileImagesResponse toImagesResponse(UserProfile profile) {
+            UserProfileImage activeProfilePicture = UserProfileImage.findActiveProfilePicture(profile);
+            return new UserProfileImagesResponse(
+                activeProfilePicture == null ? null : toImageResponse(activeProfilePicture),
+                UserProfileImage.listActiveGalleryImages(profile).stream()
+                    .map(this::toImageResponse)
+                    .toList()
+            );
+            }
+
+            private UserProfileImageResponse toImageResponse(UserProfileImage image) {
+            return new UserProfileImageResponse(
+                image.id,
+                image.profilePicture,
+                image.active,
+                IMAGE_DOWNLOAD_URL_PREFIX + image.id
+            );
+            }
 
     private UserMatchPreferencesResponse toMatchPreferencesResponse(UserMatchPreference preference) {
         return new UserMatchPreferencesResponse(
@@ -419,10 +623,31 @@ public class UserProfileServiceImplementation implements UserProfileService {
     }
 
     private UserProfileResponse emptyProfileResponse() {
-        return new UserProfileResponse(null, null, null, null, List.of(), null, List.of(), List.of(), null, List.of(), null);
+        return new UserProfileResponse(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                null,
+                List.of(),
+                null,
+                null,
+                List.of()
+        );
     }
 
     private UserMatchPreferencesResponse emptyMatchPreferencesResponse() {
         return new UserMatchPreferencesResponse(null, null, null, null, null, null, null, null, null, List.of());
+    }
+
+    private UserProfileImagesResponse emptyImagesResponse() {
+        return new UserProfileImagesResponse(null, List.of());
     }
 }
