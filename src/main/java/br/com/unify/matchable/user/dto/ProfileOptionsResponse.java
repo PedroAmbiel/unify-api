@@ -4,11 +4,13 @@ import java.util.List;
 
 public record ProfileOptionsResponse(
         List<LookupOptionResponse> genders,
+        List<LookupOptionResponse> pronouns,
         List<DisabilityOptionResponse> disabilities,
         List<LookupOptionResponse> accessibilityNeeds,
         List<LookupOptionResponse> autonomyLevels,
         List<LookupOptionResponse> communicationForms,
         List<LookupOptionResponse> lifestyleTypes,
+        List<LookupOptionResponse> loveLanguages,
         List<LookupOptionResponse> energyLevels,
         List<LookupOptionResponse> interestTypes,
         List<LookupOptionResponse> connectionTypes,

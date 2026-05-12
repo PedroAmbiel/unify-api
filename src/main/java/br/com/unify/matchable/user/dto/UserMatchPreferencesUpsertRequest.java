@@ -9,6 +9,7 @@ public record UserMatchPreferencesUpsertRequest(
         SimilarityPreference accessibilityNeedSimilarity,
         SimilarityPreference autonomyCompatibility,
         SimilarityPreference lifestyleSimilarity,
+        SimilarityPreference loveLanguageSimilarity,
         SimilarityPreference energyLevelSimilarity,
         Integer minAge,
         Integer maxAge,

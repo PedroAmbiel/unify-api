@@ -69,11 +69,13 @@ class UserProfileResourceTest {
             31,
                 "Bio em português",
                 new LookupOptionResponse(1, "Mulher"),
+                new LookupOptionResponse(2, "Ele/Dele"),
                 List.of(new DisabilityOptionResponse(1, "Física", "walk-outline")),
                 List.of(),
                 null,
                 List.of(new LookupOptionResponse(1, "Texto")),
                 List.of(new LookupOptionResponse(1, "Caseiro")),
+                List.of(new LookupOptionResponse(2, "Tempo de qualidade")),
                 null,
                 List.of(new LookupOptionResponse(1, "Tecnologia")),
                 null,
@@ -88,11 +90,13 @@ class UserProfileResourceTest {
         UserProfileUpsertRequest request = new UserProfileUpsertRequest(
                 "Bio em português",
                 1,
+            2,
                 Set.of(1),
                 Set.of(),
                 null,
                 Set.of(1),
                 Set.of(1),
+            Set.of(2),
                 null,
                 Set.of(1),
                 new LocationRequest(null, null)
@@ -106,6 +110,8 @@ class UserProfileResourceTest {
         UserProfileResponse body = assertInstanceOf(UserProfileResponse.class, response.getEntity());
         assertEquals("Bio em português", body.bio());
         assertEquals("Mulher", body.gender().description());
+        assertEquals("Ele/Dele", body.pronouns().description());
+        assertEquals(List.of("Tempo de qualidade"), body.loveLanguages().stream().map(LookupOptionResponse::description).toList());
     }
 
     @Test
@@ -120,11 +126,13 @@ class UserProfileResourceTest {
         Response response = resource.saveProfile(new UserProfileUpsertRequest(
                 null,
                 99,
+            null,
                 Set.of(),
                 Set.of(),
                 null,
                 Set.of(),
                 Set.of(),
+            Set.of(),
                 null,
                 Set.of(),
                 null
@@ -145,6 +153,7 @@ class UserProfileResourceTest {
                 "ANY",
                 null,
                 "SIMILAR",
+            "DIFFERENT",
                 null,
                 25,
                 35,
@@ -161,6 +170,7 @@ class UserProfileResourceTest {
                 SimilarityPreference.ANY,
                 null,
                 SimilarityPreference.SIMILAR,
+            SimilarityPreference.DIFFERENT,
                 null,
                 25,
                 35,
@@ -177,6 +187,7 @@ class UserProfileResourceTest {
         assertEquals(35, body.maxAge());
         assertEquals(30, body.maxMatchDistanceKm());
         assertEquals("Amizade", body.connectionType().description());
+        assertEquals("DIFFERENT", body.loveLanguageSimilarity());
     }
 
     @Test
@@ -195,6 +206,7 @@ class UserProfileResourceTest {
                 SimilarityPreference.ANY,
                 null,
                 SimilarityPreference.SIMILAR,
+            null,
                 null,
                 40,
                 30,
@@ -221,6 +233,22 @@ class UserProfileResourceTest {
         ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
         assertEquals("USER_NOT_FOUND", body.error());
         assertNull(service.capturedUser);
+    }
+
+    @Test
+    void getProfileOptionsReturnsPronounsAndLoveLanguages() {
+        StubUserProfileService service = new StubUserProfileService();
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getProfileOptions();
+
+        assertEquals(200, response.getStatus());
+        ProfileOptionsResponse body = assertInstanceOf(ProfileOptionsResponse.class, response.getEntity());
+        assertEquals(List.of("Ele/Dele"), body.pronouns().stream().map(LookupOptionResponse::description).toList());
+        assertEquals(List.of("Tempo de qualidade"), body.loveLanguages().stream().map(LookupOptionResponse::description).toList());
     }
 
     @Test
@@ -377,11 +405,13 @@ class UserProfileResourceTest {
         public ProfileOptionsResponse getProfileOptions() {
             return new ProfileOptionsResponse(
                     List.of(new LookupOptionResponse(1, "Mulher")),
+                List.of(new LookupOptionResponse(2, "Ele/Dele")),
                     List.of(new DisabilityOptionResponse(1, "Física", "walk-outline")),
                     List.of(new LookupOptionResponse(1, "Leitor de tela")),
                     List.of(new LookupOptionResponse(1, "Independente")),
                     List.of(new LookupOptionResponse(1, "Texto")),
                     List.of(new LookupOptionResponse(1, "Caseiro")),
+                List.of(new LookupOptionResponse(2, "Tempo de qualidade")),
                     List.of(new LookupOptionResponse(1, "Moderada")),
                     List.of(new LookupOptionResponse(1, "Tecnologia")),
                     List.of(new LookupOptionResponse(1, "Amizade")),

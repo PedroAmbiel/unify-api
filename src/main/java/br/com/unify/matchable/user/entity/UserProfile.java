@@ -40,6 +40,10 @@ public class UserProfile extends PanacheEntityBase {
     @JoinColumn(name = "fk_gender")
     public Gender gender;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "fk_pronouns")
+    public Pronoun pronouns;
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
         name = "user_profile_disabilities",
@@ -79,6 +83,15 @@ public class UserProfile extends PanacheEntityBase {
     )
     @OrderBy("id")
     public Set<LifestyleType> lifestyleTypes = new LinkedHashSet<>();
+
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+        name = "user_profile_love_languages",
+        joinColumns = @JoinColumn(name = "fk_user_profile"),
+        inverseJoinColumns = @JoinColumn(name = "fk_love_language")
+    )
+    @OrderBy("id")
+    public Set<LoveLanguage> loveLanguages = new LinkedHashSet<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "fk_energy_level")

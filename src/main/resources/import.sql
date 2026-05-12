@@ -20,6 +20,12 @@ values (1, 'Mulher'),
        (3, 'Não binário'),
        (4, 'Prefiro não informar');
 
+insert into pronouns(id, description)
+values (1, 'Ela/Dela'),
+       (2, 'Ele/Dele'),
+       (3, 'Elu/Delu'),
+       (4, 'Prefiro não informar');
+
 insert into disabilities(id, description, ionic_icon)
 values (1, 'Física', 'walk-outline'),
        (2, 'Visual', 'eye-outline'),
@@ -49,6 +55,13 @@ values (1, 'Caseiro'),
        (2, 'Social'),
        (3, 'Gosta de viajar'),
        (4, 'Atividades acessíveis');
+
+insert into love_languages(id, description)
+values (1, 'Palavras de afirmação'),
+       (2, 'Tempo de qualidade'),
+       (3, 'Presentes'),
+       (4, 'Atos de serviço'),
+       (5, 'Toque físico');
 
 insert into energy_levels(id, description)
 values (1, 'Baixa'),

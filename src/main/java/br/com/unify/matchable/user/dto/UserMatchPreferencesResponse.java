@@ -9,6 +9,7 @@ public record UserMatchPreferencesResponse(
         String accessibilityNeedSimilarity,
         String autonomyCompatibility,
         String lifestyleSimilarity,
+        String loveLanguageSimilarity,
         String energyLevelSimilarity,
         Integer minAge,
         Integer maxAge,

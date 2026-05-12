@@ -49,6 +49,10 @@ public class UserMatchPreference extends PanacheEntityBase {
     public SimilarityPreference lifestyleSimilarity;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "love_language_similarity")
+    public SimilarityPreference loveLanguageSimilarity;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "energy_level_similarity")
     public SimilarityPreference energyLevelSimilarity;
 

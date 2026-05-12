@@ -42,6 +42,8 @@ import br.com.unify.matchable.user.entity.EnergyLevel;
 import br.com.unify.matchable.user.entity.Gender;
 import br.com.unify.matchable.user.entity.InterestType;
 import br.com.unify.matchable.user.entity.LifestyleType;
+import br.com.unify.matchable.user.entity.LoveLanguage;
+import br.com.unify.matchable.user.entity.Pronoun;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserCoordinates;
 import br.com.unify.matchable.user.entity.UserMatchPreference;
@@ -65,11 +67,13 @@ public class UserProfileServiceImplementation implements UserProfileService {
     private static final String IMAGE_DOWNLOAD_URL_PREFIX = "/users/me/profile/images/";
 
     private static final String GENDER_FIELD = "gênero";
+    private static final String PRONOUNS_FIELD = "pronomes";
     private static final String DISABILITY_FIELD = "tipo de deficiência";
     private static final String ACCESSIBILITY_NEED_FIELD = "necessidade de acessibilidade";
     private static final String AUTONOMY_LEVEL_FIELD = "nível de autonomia";
     private static final String COMMUNICATION_FORM_FIELD = "forma de comunicação";
     private static final String LIFESTYLE_FIELD = "estilo de vida";
+    private static final String LOVE_LANGUAGE_FIELD = "linguagem do amor";
     private static final String ENERGY_LEVEL_FIELD = "ritmo de energia";
     private static final String INTEREST_FIELD = "interesse";
     private static final String CONNECTION_TYPE_FIELD = "tipo de conexão";
@@ -97,6 +101,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
         UserProfile profile = findOrCreateProfile(user);
         profile.bio = normalizeText(request.bio());
         profile.gender = resolveReference(request.genderId(), Gender.class, GENDER_FIELD);
+        profile.pronouns = resolveReference(request.pronounsId(), Pronoun.class, PRONOUNS_FIELD);
         replaceSet(profile.disabilities, resolveReferenceSet(request.disabilityIds(), Disability.class, DISABILITY_FIELD));
         replaceSet(
                 profile.accessibilityNeeds,
@@ -108,6 +113,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 resolveReferenceSet(request.communicationFormIds(), CommunicationForm.class, COMMUNICATION_FORM_FIELD)
         );
         replaceSet(profile.lifestyleTypes, resolveReferenceSet(request.lifestyleTypeIds(), LifestyleType.class, LIFESTYLE_FIELD));
+            replaceSet(profile.loveLanguages, resolveReferenceSet(request.loveLanguageIds(), LoveLanguage.class, LOVE_LANGUAGE_FIELD));
         profile.energyLevel = resolveReference(request.energyLevelId(), EnergyLevel.class, ENERGY_LEVEL_FIELD);
         replaceSet(profile.interestTypes, resolveReferenceSet(request.interestTypeIds(), InterestType.class, INTEREST_FIELD));
         replaceActiveLocation(profile, request.location());
@@ -145,6 +151,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
         preference.accessibilityNeedSimilarity = request.accessibilityNeedSimilarity();
         preference.autonomyCompatibility = request.autonomyCompatibility();
         preference.lifestyleSimilarity = request.lifestyleSimilarity();
+        preference.loveLanguageSimilarity = request.loveLanguageSimilarity();
         preference.energyLevelSimilarity = request.energyLevelSimilarity();
         Integer minAge = validatePreferredAge(request.minAge(), "A idade mínima desejada");
         Integer maxAge = validatePreferredAge(request.maxAge(), "A idade máxima desejada");
@@ -169,19 +176,27 @@ public class UserProfileServiceImplementation implements UserProfileService {
         List<String> missingProfileFields = new java.util.ArrayList<>();
         if (profile == null) {
             missingProfileFields.add("gênero");
+            missingProfileFields.add("pronomes");
             missingProfileFields.add("tipo de deficiência");
             missingProfileFields.add("forma de comunicação");
             missingProfileFields.add("estilo de vida");
+            missingProfileFields.add("linguagens do amor");
             missingProfileFields.add("interesses");
         } else {
             if (profile.gender == null) {
                 missingProfileFields.add("gênero");
+            }
+            if (profile.pronouns == null) {
+                missingProfileFields.add("pronomes");
             }
             if (profile.communicationForms == null || profile.communicationForms.isEmpty()) {
                 missingProfileFields.add("forma de comunicação");
             }
             if (profile.lifestyleTypes == null || profile.lifestyleTypes.isEmpty()) {
                 missingProfileFields.add("estilo de vida");
+            }
+            if (profile.loveLanguages == null || profile.loveLanguages.isEmpty()) {
+                missingProfileFields.add("linguagens do amor");
             }
             if (profile.interestTypes == null || profile.interestTypes.isEmpty()) {
                 missingProfileFields.add("interesses");
@@ -193,6 +208,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
             missingMatchFields.add("distância máxima do match");
             missingMatchFields.add("tipo de conexão");
             missingMatchFields.add("estilo de vida preferido");
+            missingMatchFields.add("linguagem do amor preferida");
             missingMatchFields.add("gênero desejado");
         } else {
             if (preference.maxMatchDistanceKm == null) {
@@ -203,6 +219,9 @@ public class UserProfileServiceImplementation implements UserProfileService {
             }
             if (preference.lifestyleSimilarity == null) {
                 missingMatchFields.add("estilo de vida preferido");
+            }
+            if (preference.loveLanguageSimilarity == null) {
+                missingMatchFields.add("linguagem do amor preferida");
             }
             if (preference.desiredGenders == null || preference.desiredGenders.isEmpty()) {
                 missingMatchFields.add("gênero desejado");
@@ -226,6 +245,9 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 Gender.<Gender>listAll(Sort.by("id")).stream()
                         .map(gender -> toOption(gender.id, gender.description))
                         .toList(),
+            Pronoun.<Pronoun>listAll(Sort.by("id")).stream()
+                .map(pronoun -> toOption(pronoun.id, pronoun.description))
+                .toList(),
                 Disability.<Disability>listAll(Sort.by("id")).stream()
                         .map(disability -> new DisabilityOptionResponse(disability.id, disability.description, disability.ionicIcon))
                         .toList(),
@@ -241,6 +263,9 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 LifestyleType.<LifestyleType>listAll(Sort.by("id")).stream()
                         .map(type -> toOption(type.id, type.description))
                         .toList(),
+                LoveLanguage.<LoveLanguage>listAll(Sort.by("id")).stream()
+                    .map(type -> toOption(type.id, type.description))
+                    .toList(),
                 EnergyLevel.<EnergyLevel>listAll(Sort.by("id")).stream()
                         .map(level -> toOption(level.id, level.description))
                         .toList(),
@@ -546,6 +571,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
             calculateAge(profile.user),
                 profile.bio,
                 profile.gender == null ? null : toOption(profile.gender.id, profile.gender.description),
+            profile.pronouns == null ? null : toOption(profile.pronouns.id, profile.pronouns.description),
                 profile.disabilities.stream()
                         .map(disability -> new DisabilityOptionResponse(disability.id, disability.description, disability.ionicIcon))
                         .toList(),
@@ -559,6 +585,9 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 profile.lifestyleTypes.stream()
                         .map(type -> toOption(type.id, type.description))
                         .toList(),
+                profile.loveLanguages.stream()
+                    .map(type -> toOption(type.id, type.description))
+                    .toList(),
                 profile.energyLevel == null ? null : toOption(profile.energyLevel.id, profile.energyLevel.description),
                 profile.interestTypes.stream()
                         .map(type -> toOption(type.id, type.description))
@@ -608,6 +637,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 preference.accessibilityNeedSimilarity == null ? null : preference.accessibilityNeedSimilarity.name(),
                 preference.autonomyCompatibility == null ? null : preference.autonomyCompatibility.name(),
                 preference.lifestyleSimilarity == null ? null : preference.lifestyleSimilarity.name(),
+                preference.loveLanguageSimilarity == null ? null : preference.loveLanguageSimilarity.name(),
                 preference.energyLevelSimilarity == null ? null : preference.energyLevelSimilarity.name(),
                 preference.minAge,
                 preference.maxAge,
@@ -630,9 +660,11 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 null,
                 null,
                 null,
+                null,
                 List.of(),
                 List.of(),
                 null,
+                List.of(),
                 List.of(),
                 List.of(),
                 null,
@@ -644,7 +676,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
     }
 
     private UserMatchPreferencesResponse emptyMatchPreferencesResponse() {
-        return new UserMatchPreferencesResponse(null, null, null, null, null, null, null, null, null, List.of());
+        return new UserMatchPreferencesResponse(null, null, null, null, null, null, null, null, null, null, List.of());
     }
 
     private UserProfileImagesResponse emptyImagesResponse() {
