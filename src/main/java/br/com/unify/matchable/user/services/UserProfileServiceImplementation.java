@@ -62,7 +62,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
 
     private static final int MINIMUM_PREFERRED_AGE = 18;
     private static final int MAX_ACTIVE_GALLERY_IMAGES = 5;
-    private static final double IMAGE_OUTPUT_QUALITY = 0.85d;
+    private static final double IMAGE_OUTPUT_QUALITY = 0.75d;
     private static final String IMAGE_NOT_FOUND_MESSAGE = "Imagem não encontrada";
     private static final String IMAGE_DOWNLOAD_URL_PREFIX = "/users/me/profile/images/";
 
