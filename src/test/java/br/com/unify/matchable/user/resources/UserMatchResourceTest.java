@@ -16,7 +16,9 @@ import org.junit.jupiter.api.Test;
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.user.dto.MatchDecisionRequest;
 import br.com.unify.matchable.user.dto.MatchDecisionResponse;
+import br.com.unify.matchable.user.dto.MutualMatchPageResponse;
 import br.com.unify.matchable.user.dto.MutualMatchResponse;
+import br.com.unify.matchable.user.dto.MutualMatchSummaryResponse;
 import br.com.unify.matchable.user.dto.PotentialMatchesRequest;
 import br.com.unify.matchable.user.dto.UserProfileImageResponse;
 import br.com.unify.matchable.user.entity.User;
@@ -104,6 +106,62 @@ class UserMatchResourceTest {
     }
 
     @Test
+    void getMutualMatchesPageReturnsPagedPayload() {
+        StubUserMatchService service = new StubUserMatchService();
+        UUID userId = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
+        UUID imageId = UUID.randomUUID();
+        service.mutualMatchesPageResponse = new MutualMatchPageResponse(
+                List.of(new MutualMatchSummaryResponse(
+                        userId,
+                        profileId,
+                        "Ana Souza",
+                        29,
+                        new UserProfileImageResponse(imageId, true, true, "/users/me/matches/images/" + imageId)
+                )),
+                1,
+                10,
+                11L,
+                2,
+                true
+        );
+
+        TestableUserMatchResource resource = new TestableUserMatchResource();
+        resource.userMatchService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getMutualMatchesPage(1, 10);
+
+        assertEquals(200, response.getStatus());
+        MutualMatchPageResponse body = assertInstanceOf(MutualMatchPageResponse.class, response.getEntity());
+        assertEquals(1, body.page());
+        assertEquals(10, body.size());
+        assertEquals(11L, body.totalElements());
+        assertTrue(body.hasNext());
+        assertEquals(userId, body.matches().getFirst().userId());
+        assertEquals(profileId, body.matches().getFirst().userProfileId());
+        assertEquals(1, service.capturedPage);
+        assertEquals(10, service.capturedSize);
+    }
+
+    @Test
+    void getMutualMatchesPageReturnsValidationErrorWhenPaginationIsInvalid() {
+        StubUserMatchService service = new StubUserMatchService();
+        service.pagedMutualMatchesValidation = new IllegalArgumentException("O parâmetro 'page' deve ser maior ou igual a zero");
+
+        TestableUserMatchResource resource = new TestableUserMatchResource();
+        resource.userMatchService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getMutualMatchesPage(-1, 10);
+
+        assertEquals(400, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("VALIDATION_INVALID_FORMAT", body.error());
+        assertTrue(body.message().contains("parâmetro 'page'"));
+    }
+
+    @Test
     void getMatchedProfileImageReturnsStoredBytes() {
         StubUserMatchService service = new StubUserMatchService();
         service.imageBytes = new byte[] { 8, 7, 6 };
@@ -141,6 +199,8 @@ class UserMatchResourceTest {
         private User capturedUser;
         private PotentialMatchesRequest capturedPotentialMatchesRequest;
         private UUID capturedImageId;
+        private Integer capturedPage;
+        private Integer capturedSize;
         private List<UUID> discoveryResponse = List.of();
         private MatchDecisionResponse decisionResponse = new MatchDecisionResponse(
                 UUID.randomUUID(),
@@ -152,9 +212,11 @@ class UserMatchResourceTest {
                 false
         );
         private List<MutualMatchResponse> mutualMatchesResponse = List.of();
+            private MutualMatchPageResponse mutualMatchesPageResponse = new MutualMatchPageResponse(List.of(), 0, 20, 0L, 0, false);
         private byte[] imageBytes = new byte[] { 1 };
         private IllegalStateException decisionConflict;
         private NoSuchElementException decisionNotFound;
+            private IllegalArgumentException pagedMutualMatchesValidation;
 
         @Override
         public List<UUID> getPotentialMatches(User user, PotentialMatchesRequest request) {
@@ -179,6 +241,17 @@ class UserMatchResourceTest {
         public List<MutualMatchResponse> getMutualMatches(User user) {
             this.capturedUser = user;
             return mutualMatchesResponse;
+        }
+
+        @Override
+        public MutualMatchPageResponse getMutualMatchesPage(User user, Integer page, Integer size) {
+            this.capturedUser = user;
+            this.capturedPage = page;
+            this.capturedSize = size;
+            if (pagedMutualMatchesValidation != null) {
+                throw pagedMutualMatchesValidation;
+            }
+            return mutualMatchesPageResponse;
         }
 
         @Override

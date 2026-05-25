@@ -19,6 +19,7 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -74,6 +75,22 @@ public class UserMatchResource {
             return userNotFoundResponse();
         }
         return Response.ok(userMatchService.getMutualMatches(user)).build();
+    }
+
+    @GET
+    @Path("/mutual/paged")
+    @Transactional
+    public Response getMutualMatchesPage(@QueryParam("page") Integer page, @QueryParam("size") Integer size) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(userMatchService.getMutualMatchesPage(user, page, size)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        }
     }
 
     @GET

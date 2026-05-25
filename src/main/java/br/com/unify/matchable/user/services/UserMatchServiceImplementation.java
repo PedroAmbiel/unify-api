@@ -23,7 +23,9 @@ import java.util.stream.IntStream;
 import br.com.unify.matchable.common.UUIDv7Generator;
 import br.com.unify.matchable.user.dto.MatchDecisionRequest;
 import br.com.unify.matchable.user.dto.MatchDecisionResponse;
+import br.com.unify.matchable.user.dto.MutualMatchPageResponse;
 import br.com.unify.matchable.user.dto.MutualMatchResponse;
+import br.com.unify.matchable.user.dto.MutualMatchSummaryResponse;
 import br.com.unify.matchable.user.dto.PotentialMatchesRequest;
 import br.com.unify.matchable.user.dto.UserProfileImageResponse;
 import br.com.unify.matchable.user.entity.AccessibilityNeed;
@@ -40,6 +42,8 @@ import br.com.unify.matchable.user.entity.UserPossibleMatch;
 import br.com.unify.matchable.user.entity.UserProfile;
 import br.com.unify.matchable.user.entity.UserProfileImage;
 import br.com.unify.matchable.user.enums.SimilarityPreference;
+import io.quarkus.hibernate.orm.panache.PanacheQuery;
+import io.quarkus.panache.common.Page;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
@@ -49,6 +53,9 @@ import jakarta.transaction.Transactional;
 @ApplicationScoped
 public class UserMatchServiceImplementation implements UserMatchService {
 
+    private static final int DEFAULT_PAGE = 0;
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int MAX_PAGE_SIZE = 100;
     private static final int TARGET_MATCH_COUNT = 50;
     private static final int PRESELECTION_LIMIT = 250;
     private static final int MINIMUM_DISCOVERY_SCORE = 30;
@@ -56,6 +63,8 @@ public class UserMatchServiceImplementation implements UserMatchService {
     private static final int MAX_AGE_EXPANSION_YEARS = 10;
     private static final int AGE_EXPANSION_STEP_YEARS = 5;
     private static final int MINIMUM_ALLOWED_AGE = 18;
+    private static final String INVALID_PAGE_MESSAGE = "O parâmetro 'page' deve ser maior ou igual a zero";
+    private static final String INVALID_SIZE_MESSAGE = "O parâmetro 'size' deve estar entre 1 e " + MAX_PAGE_SIZE;
     private static final String MATCH_IMAGE_DOWNLOAD_URL_PREFIX = "/users/me/matches/images/";
     private static final String MATCH_IMAGE_NOT_FOUND_MESSAGE = "Imagem de match não encontrada";
 
@@ -185,6 +194,24 @@ public class UserMatchServiceImplementation implements UserMatchService {
         return UserPossibleMatch.listConfirmedForProfile(currentProfile).stream()
                 .map(match -> toMutualMatchResponse(currentProfile, match))
                 .toList();
+    }
+
+    @Override
+    public MutualMatchPageResponse getMutualMatchesPage(User user, Integer page, Integer size) {
+        int resolvedPage = validatePage(page);
+        int resolvedSize = validateSize(size);
+
+        UserProfile currentProfile = UserProfile.findByUser(user);
+        if (currentProfile == null) {
+            return toMutualMatchPageResponse(List.of(), resolvedPage, resolvedSize, 0);
+        }
+
+        PanacheQuery<UserPossibleMatch> query = UserPossibleMatch.findConfirmedForProfile(currentProfile);
+        long totalElements = query.count();
+        List<MutualMatchSummaryResponse> matches = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
+                .map(match -> toMutualMatchSummaryResponse(currentProfile, match))
+                .toList();
+        return toMutualMatchPageResponse(matches, resolvedPage, resolvedSize, totalElements);
     }
 
     @Override
@@ -945,6 +972,38 @@ public class UserMatchServiceImplementation implements UserMatchService {
         );
     }
 
+            private MutualMatchSummaryResponse toMutualMatchSummaryResponse(UserProfile currentProfile, UserPossibleMatch match) {
+            UserProfile otherProfile = Objects.equals(match.starterProfile.id, currentProfile.id)
+                ? match.pendingProfile
+                : match.starterProfile;
+            User otherUser = otherProfile == null ? null : otherProfile.user;
+            UserProfileImage activeProfilePicture = otherProfile == null ? null : UserProfileImage.findActiveProfilePicture(otherProfile);
+            return new MutualMatchSummaryResponse(
+                otherUser == null ? null : otherUser.id,
+                otherProfile == null ? null : otherProfile.id,
+                buildFullName(otherUser),
+                calculateAge(otherUser),
+                activeProfilePicture == null ? null : toMatchImageResponse(activeProfilePicture)
+            );
+            }
+
+            private MutualMatchPageResponse toMutualMatchPageResponse(
+                List<MutualMatchSummaryResponse> matches,
+                int page,
+                int size,
+                long totalElements
+            ) {
+            int totalPages = totalElements == 0 ? 0 : (int) Math.ceil((double) totalElements / size);
+            return new MutualMatchPageResponse(
+                matches,
+                page,
+                size,
+                totalElements,
+                totalPages,
+                page + 1 < totalPages
+            );
+            }
+
     private UserProfileImageResponse toMatchImageResponse(UserProfileImage image) {
         return new UserProfileImageResponse(
                 image.id,
@@ -973,6 +1032,33 @@ public class UserMatchServiceImplementation implements UserMatchService {
         }
 
         return Period.between(user.birthdate, today).getYears();
+    }
+
+    private String buildFullName(User user) {
+        if (user == null) {
+            return null;
+        }
+
+        String firstName = user.name == null ? "" : user.name.trim();
+        String lastName = user.lastName == null ? "" : user.lastName.trim();
+        String fullName = (firstName + " " + lastName).trim();
+        return fullName.isEmpty() ? null : fullName;
+    }
+
+    private int validatePage(Integer page) {
+        int resolvedPage = page == null ? DEFAULT_PAGE : page;
+        if (resolvedPage < 0) {
+            throw new IllegalArgumentException(INVALID_PAGE_MESSAGE);
+        }
+        return resolvedPage;
+    }
+
+    private int validateSize(Integer size) {
+        int resolvedSize = size == null ? DEFAULT_PAGE_SIZE : size;
+        if (resolvedSize < 1 || resolvedSize > MAX_PAGE_SIZE) {
+            throw new IllegalArgumentException(INVALID_SIZE_MESSAGE);
+        }
+        return resolvedSize;
     }
 
     private record CandidateSearchRow(UUID profileId, double distanceKm) {

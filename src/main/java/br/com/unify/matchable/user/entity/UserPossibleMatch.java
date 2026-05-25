@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import io.quarkus.hibernate.orm.panache.PanacheQuery;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -65,11 +66,15 @@ public class UserPossibleMatch extends PanacheEntityBase {
         return list("starterProfile = ?1 and pendingAccepted is null order by createdAt desc", starterProfile);
     }
 
-    public static List<UserPossibleMatch> listConfirmedForProfile(UserProfile profile) {
-        return list(
+    public static PanacheQuery<UserPossibleMatch> findConfirmedForProfile(UserProfile profile) {
+        return find(
                 "(starterProfile = ?1 or pendingProfile = ?1) and starterAccepted = true and pendingAccepted = true order by createdAt desc",
                 profile
         );
+    }
+
+    public static List<UserPossibleMatch> listConfirmedForProfile(UserProfile profile) {
+        return findConfirmedForProfile(profile).list();
     }
 
     public static List<UserPossibleMatch> listAllRelatedToProfile(UserProfile profile) {

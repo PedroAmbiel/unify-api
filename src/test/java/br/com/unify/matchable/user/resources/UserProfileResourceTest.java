@@ -22,6 +22,8 @@ import br.com.unify.matchable.user.dto.LookupOptionResponse;
 import br.com.unify.matchable.user.dto.ProfileCompletionResponse;
 import br.com.unify.matchable.user.dto.ProfileOptionsResponse;
 import br.com.unify.matchable.user.dto.SimilarityOptionResponse;
+import br.com.unify.matchable.user.dto.UserPublicProfileGalleryImagesResponse;
+import br.com.unify.matchable.user.dto.UserPublicProfileResponse;
 import br.com.unify.matchable.user.dto.UserProfileImageResponse;
 import br.com.unify.matchable.user.dto.UserProfileImagesResponse;
 import br.com.unify.matchable.user.dto.UserMatchPreferencesResponse;
@@ -252,6 +254,156 @@ class UserProfileResourceTest {
     }
 
     @Test
+    void getPublicProfileReturnsRequestedPayload() {
+        StubUserProfileService service = new StubUserProfileService();
+        UUID userProfileId = UUID.randomUUID();
+        UUID firstGalleryImageId = UUID.randomUUID();
+        UUID secondGalleryImageId = UUID.randomUUID();
+        service.publicProfileResponse = new UserPublicProfileResponse(
+                userProfileId,
+                "Larissa",
+                28,
+                "Adoro conversar sobre livros e tecnologia assistiva",
+                new LookupOptionResponse(1, "Mulher"),
+                new LookupOptionResponse(2, "Ela/Dela"),
+                List.of(new DisabilityOptionResponse(1, "Física", "walk-outline")),
+                List.of(new LookupOptionResponse(1, "Leitor de tela")),
+                new LookupOptionResponse(1, "Independente"),
+                List.of(new LookupOptionResponse(1, "Texto")),
+                List.of(new LookupOptionResponse(1, "Caseira")),
+                List.of(new LookupOptionResponse(2, "Tempo de qualidade")),
+                new LookupOptionResponse(1, "Moderada"),
+                List.of(new LookupOptionResponse(1, "Tecnologia")),
+                List.of(firstGalleryImageId, secondGalleryImageId)
+        );
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getPublicProfile(userProfileId);
+
+        assertEquals(200, response.getStatus());
+        assertEquals(userProfileId, service.capturedPublicProfileId);
+        UserPublicProfileResponse body = assertInstanceOf(UserPublicProfileResponse.class, response.getEntity());
+        assertEquals("Larissa", body.name());
+        assertEquals(28, body.age());
+        assertEquals(List.of("Tecnologia"), body.interestTypes().stream().map(LookupOptionResponse::description).toList());
+        assertEquals(List.of(firstGalleryImageId, secondGalleryImageId), body.galleryImageIds());
+    }
+
+    @Test
+    void getPublicProfileReturnsValidationErrorWhenQueryParamIsMissing() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.publicProfileException = new IllegalArgumentException("Informe o parâmetro de consulta 'userProfileId'");
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getPublicProfile(null);
+
+        assertEquals(400, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("VALIDATION_INVALID_FORMAT", body.error());
+        assertTrue(body.message().contains("userProfileId"));
+    }
+
+    @Test
+    void getPublicProfileReturnsNotFoundWhenServiceCannotFindTargetProfile() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.publicProfileNotFound = new NoSuchElementException("Perfil público não encontrado");
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getPublicProfile(UUID.randomUUID());
+
+        assertEquals(404, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("RESOURCE_NOT_FOUND", body.error());
+        assertTrue(body.message().contains("Perfil público não encontrado"));
+    }
+
+    @Test
+    void getPublicGalleryImagesReturnsRequestedPayload() {
+        StubUserProfileService service = new StubUserProfileService();
+        UUID userProfileId = UUID.randomUUID();
+        UUID firstGalleryImageId = UUID.randomUUID();
+        UUID secondGalleryImageId = UUID.randomUUID();
+        service.publicGalleryImagesResponse = new UserPublicProfileGalleryImagesResponse(
+                userProfileId,
+                List.of(firstGalleryImageId, secondGalleryImageId)
+        );
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getPublicGalleryImages(userProfileId);
+
+        assertEquals(200, response.getStatus());
+        assertEquals(userProfileId, service.capturedPublicProfileId);
+        UserPublicProfileGalleryImagesResponse body = assertInstanceOf(UserPublicProfileGalleryImagesResponse.class, response.getEntity());
+        assertEquals(List.of(firstGalleryImageId, secondGalleryImageId), body.galleryImageIds());
+    }
+
+    @Test
+    void getPublicGalleryImagesReturnsValidationErrorWhenQueryParamIsMissing() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.publicGalleryImagesException = new IllegalArgumentException("Informe o parâmetro de consulta 'userProfileId'");
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getPublicGalleryImages(null);
+
+        assertEquals(400, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("VALIDATION_INVALID_FORMAT", body.error());
+        assertTrue(body.message().contains("userProfileId"));
+    }
+
+    @Test
+    void getPublicGalleryImageReturnsStoredBytes() {
+        StubUserProfileService service = new StubUserProfileService();
+        UUID userProfileId = UUID.randomUUID();
+        UUID imageId = UUID.randomUUID();
+        service.publicGalleryImageContent = new byte[] { 7, 8, 9 };
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getPublicGalleryImage(userProfileId, imageId);
+
+        assertEquals(200, response.getStatus());
+        assertEquals("image/jpeg", response.getMediaType().toString());
+        assertArrayEquals(new byte[] { 7, 8, 9 }, assertInstanceOf(byte[].class, response.getEntity()));
+        assertEquals(userProfileId, service.capturedPublicProfileId);
+        assertEquals(imageId, service.capturedPublicGalleryImageId);
+    }
+
+    @Test
+    void getPublicGalleryImageReturnsNotFoundWhenImageCannotBeRead() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.publicGalleryImageNotFound = new NoSuchElementException("Imagem pública não encontrada");
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getPublicGalleryImage(UUID.randomUUID(), UUID.randomUUID());
+
+        assertEquals(404, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("RESOURCE_NOT_FOUND", body.error());
+        assertTrue(body.message().contains("Imagem pública não encontrada"));
+    }
+
+    @Test
     void uploadProfilePictureReturnsSavedImagesPayload() {
         StubUserProfileService service = new StubUserProfileService();
         UUID imageId = UUID.randomUUID();
@@ -353,15 +505,26 @@ class UserProfileResourceTest {
         private UserMatchPreferencesUpsertRequest capturedMatchPreferencesRequest;
         private byte[] capturedImageBytes;
         private UUID capturedImageId;
+        private UUID capturedPublicProfileId;
+        private UUID capturedPublicGalleryImageId;
         private UserProfileResponse profileResponse;
+        private UserPublicProfileResponse publicProfileResponse;
+        private UserPublicProfileGalleryImagesResponse publicGalleryImagesResponse;
         private UserMatchPreferencesResponse matchPreferencesResponse;
         private ProfileCompletionResponse completionResponse;
         private UserProfileImagesResponse imagesResponse;
         private byte[] imageContent;
+        private byte[] publicGalleryImageContent;
         private IllegalArgumentException profileException;
+        private IllegalArgumentException publicProfileException;
+        private IllegalArgumentException publicGalleryImagesException;
+        private IllegalArgumentException publicGalleryImageException;
         private IllegalArgumentException matchPreferencesException;
         private IllegalStateException imageConflict;
         private NoSuchElementException imageNotFound;
+        private NoSuchElementException publicProfileNotFound;
+        private NoSuchElementException publicGalleryImagesNotFound;
+        private NoSuchElementException publicGalleryImageNotFound;
 
         @Override
         public UserProfileResponse getProfile(User user) {
@@ -417,6 +580,43 @@ class UserProfileResourceTest {
                     List.of(new LookupOptionResponse(1, "Amizade")),
                     List.of(new SimilarityOptionResponse("ANY", "Indiferente"))
             );
+        }
+
+        @Override
+        public UserPublicProfileResponse getPublicProfile(UUID userProfileId) {
+            this.capturedPublicProfileId = userProfileId;
+            if (publicProfileException != null) {
+                throw publicProfileException;
+            }
+            if (publicProfileNotFound != null) {
+                throw publicProfileNotFound;
+            }
+            return publicProfileResponse;
+        }
+
+        @Override
+        public UserPublicProfileGalleryImagesResponse getPublicGalleryImages(UUID userProfileId) {
+            this.capturedPublicProfileId = userProfileId;
+            if (publicGalleryImagesException != null) {
+                throw publicGalleryImagesException;
+            }
+            if (publicGalleryImagesNotFound != null) {
+                throw publicGalleryImagesNotFound;
+            }
+            return publicGalleryImagesResponse;
+        }
+
+        @Override
+        public byte[] getPublicGalleryImageContent(UUID userProfileId, UUID imageId) {
+            this.capturedPublicProfileId = userProfileId;
+            this.capturedPublicGalleryImageId = imageId;
+            if (publicGalleryImageException != null) {
+                throw publicGalleryImageException;
+            }
+            if (publicGalleryImageNotFound != null) {
+                throw publicGalleryImageNotFound;
+            }
+            return publicGalleryImageContent;
         }
 
         @Override
