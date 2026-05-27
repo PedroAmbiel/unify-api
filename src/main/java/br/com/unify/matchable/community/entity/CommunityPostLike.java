@@ -8,6 +8,7 @@ import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -26,11 +27,11 @@ public class CommunityPostLike extends PanacheEntityBase {
     public UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_post", nullable = false)
+    @JoinColumn(name = "fk_post", nullable = false, foreignKey = @ForeignKey(name = "fk_community_post_likes_post"))
     public CommunityPost post;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_user", nullable = false)
+    @JoinColumn(name = "fk_user", nullable = false, foreignKey = @ForeignKey(name = "fk_community_post_likes_user"))
     public User user;
 
     @Column(name = "created_at", nullable = false)

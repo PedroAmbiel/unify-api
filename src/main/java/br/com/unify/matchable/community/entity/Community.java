@@ -11,6 +11,7 @@ import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Lob;
@@ -32,7 +33,7 @@ public class Community extends PanacheEntityBase {
     public String description;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_owner_user", nullable = false)
+    @JoinColumn(name = "fk_owner_user", nullable = false, foreignKey = @ForeignKey(name = "fk_communities_owner_user"))
     public User owner;
 
     @Lob

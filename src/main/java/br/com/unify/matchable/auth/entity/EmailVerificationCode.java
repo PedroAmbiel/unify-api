@@ -5,6 +5,7 @@ import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
@@ -29,7 +30,7 @@ public class EmailVerificationCode extends PanacheEntityBase {
     public UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_user", nullable = false)
+        @JoinColumn(name = "fk_user", nullable = false, foreignKey = @ForeignKey(name = "fk_email_verification_codes_user"))
     public User user;
 
     @Column(name = "code_hash", nullable = false)

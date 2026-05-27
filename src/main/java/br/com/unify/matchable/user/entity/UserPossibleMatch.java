@@ -9,6 +9,7 @@ import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
@@ -38,11 +39,11 @@ public class UserPossibleMatch extends PanacheEntityBase {
     public UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_starter_user_profile", nullable = false)
+    @JoinColumn(name = "fk_starter_user_profile", nullable = false, foreignKey = @ForeignKey(name = "fk_user_possible_matches_starter_user_profile"))
     public UserProfile starterProfile;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_pending_user_profile", nullable = false)
+    @JoinColumn(name = "fk_pending_user_profile", nullable = false, foreignKey = @ForeignKey(name = "fk_user_possible_matches_pending_user_profile"))
     public UserProfile pendingProfile;
 
     @Column(name = "created_at", nullable = false)

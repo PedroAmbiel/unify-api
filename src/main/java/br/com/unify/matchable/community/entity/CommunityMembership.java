@@ -13,6 +13,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -31,11 +32,11 @@ public class CommunityMembership extends PanacheEntityBase {
     public UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_community", nullable = false)
+    @JoinColumn(name = "fk_community", nullable = false, foreignKey = @ForeignKey(name = "fk_community_memberships_community"))
     public Community community;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_user_profile", nullable = false)
+    @JoinColumn(name = "fk_user_profile", nullable = false, foreignKey = @ForeignKey(name = "fk_community_memberships_user_profile"))
     public UserProfile userProfile;
 
     @Enumerated(EnumType.STRING)
