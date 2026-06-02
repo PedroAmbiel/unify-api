@@ -50,7 +50,7 @@ public class ActiveConnection extends PanacheEntityBase {
     }
 
     public static ActiveConnection findByRefreshTokenHash(String hash) {
-        return find("refreshTokenHash = ?1 and revoked = false", hash).firstResult();
+        return find("refreshToken = ?1 and revoked = false", hash).firstResult();
     }
 
     public static void revokeAllForUser(User user) {
