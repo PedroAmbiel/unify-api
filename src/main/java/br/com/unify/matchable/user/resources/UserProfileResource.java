@@ -26,6 +26,7 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
@@ -115,6 +116,64 @@ public class UserProfileResource {
             return userNotFoundResponse();
         }
         return Response.ok(userProfileService.getProfileOptions()).build();
+    }
+
+    @GET
+    @Path("/profile/public")
+    @Transactional
+    public Response getPublicProfile(@QueryParam("userProfileId") UUID userProfileId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(userProfileService.getPublicProfile(userProfileId)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @GET
+    @Path("/profile/public/images")
+    @Transactional
+    public Response getPublicGalleryImages(@QueryParam("userProfileId") UUID userProfileId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(userProfileService.getPublicGalleryImages(userProfileId)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @GET
+    @Path("/profile/public/images/{imageId}")
+    @Produces("image/jpeg")
+    @Transactional
+    public Response getPublicGalleryImage(
+            @QueryParam("userProfileId") UUID userProfileId,
+            @PathParam("imageId") UUID imageId
+    ) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(userProfileService.getPublicGalleryImageContent(userProfileId, imageId)).type("image/jpeg").build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
     }
 
     @GET

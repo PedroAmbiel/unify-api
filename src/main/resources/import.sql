@@ -14,10 +14,34 @@ create index if not exists idx_user_profile_images_active_gallery
     on user_profile_images (fk_user_profile, id desc)
     where active = true and is_profile_pic = false;
 
+create index if not exists idx_community_posts_feed
+    on community_posts (fk_community, created_at desc, id desc);
+
+create index if not exists idx_community_post_comments_post
+    on community_post_comments (fk_post, created_at asc, id asc);
+
+create index if not exists idx_community_post_likes_post
+    on community_post_likes (fk_post);
+
+create index if not exists idx_community_memberships_community
+    on community_memberships (fk_community);
+
+create index if not exists idx_communities_owner
+    on communities (fk_owner_user);
+
+create index if not exists idx_community_memberships_role
+    on community_memberships (fk_community, role);
+
 insert into genders(id, description)
 values (1, 'Mulher'),
        (2, 'Homem'),
        (3, 'Não binário'),
+       (4, 'Prefiro não informar');
+
+insert into pronouns(id, description)
+values (1, 'Ela/Dela'),
+       (2, 'Ele/Dele'),
+       (3, 'Elu/Delu'),
        (4, 'Prefiro não informar');
 
 insert into disabilities(id, description, ionic_icon)
@@ -50,6 +74,13 @@ values (1, 'Caseiro'),
        (3, 'Gosta de viajar'),
        (4, 'Atividades acessíveis');
 
+insert into love_languages(id, description)
+values (1, 'Palavras de afirmação'),
+       (2, 'Tempo de qualidade'),
+       (3, 'Presentes'),
+       (4, 'Atos de serviço'),
+       (5, 'Toque físico');
+
 insert into energy_levels(id, description)
 values (1, 'Baixa'),
        (2, 'Moderada'),
@@ -73,3 +104,22 @@ insert into
     users(id, verified, last_updated_at, birthdate, email, last_name, name, password)
     values ('019dbf9a-5a8e-72de-85cb-8426b424c6fe', true, '2024-06-01T00:00:00Z', '1995-04-15', 'teste@gmail.com', 'Ambiel', 'Pedro', '$2a$10$YaiH0J4eVMU6kjtG5pm.oeOxPRPCk1ZX.XjKrXZOqEdhQv1bbo8KG'),
     ('019dcfdc-fa72-722b-89ac-e331eb4f119a', false, '2024-06-01T00:00:00Z', '1998-11-08', 'verificar@gmail.com', 'Email', 'Verificar', '$2a$10$YaiH0J4eVMU6kjtG5pm.oeOxPRPCk1ZX.XjKrXZOqEdhQv1bbo8KG');
+
+insert into user_profiles(id, fk_user)
+values ('01972a85-e1fd-7309-8f49-7d2168c18c11', '019dbf9a-5a8e-72de-85cb-8426b424c6fe');
+
+insert into communities(id, active, featured, description, name, fk_owner_user)
+values ('01972a85-e1fd-7309-8f49-7d2168c18a11', true, true,
+    'Espaço da comunidade Unify para compartilhar experiências, apoio e novidades sobre acessibilidade e conexão.',
+    'Comunidade Unify',
+    '019dbf9a-5a8e-72de-85cb-8426b424c6fe');
+
+insert into communities(id, active, featured, description, name, fk_owner_user)
+values ('01972a85-e1fc-7309-8f49-7d2168c18a11', true, true,
+        'Espaço da comunidade Unify para compartilhar experiências, apoio e novidades sobre acessibilidade e conexão.',
+        'Teste Unify',
+        '019dbf9a-5a8e-72de-85cb-8426b424c6fe');
+
+insert into community_memberships(id, fk_community, fk_user_profile, role, joined_at)
+values ('01972a85-e1fd-7309-8f49-7d2168c18b11', '01972a85-e1fd-7309-8f49-7d2168c18a11', '01972a85-e1fd-7309-8f49-7d2168c18c11', 'ADMIN', '2024-06-01T00:00:00Z'),
+       ('01972a85-e1fc-7309-8f49-7d2168c18b11', '01972a85-e1fc-7309-8f49-7d2168c18a11', '01972a85-e1fd-7309-8f49-7d2168c18c11', 'ADMIN', '2024-06-01T00:00:00Z');

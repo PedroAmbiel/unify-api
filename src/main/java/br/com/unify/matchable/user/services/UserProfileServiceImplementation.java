@@ -1,13 +1,6 @@
 package br.com.unify.matchable.user.services;
 
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.math.BigDecimal;
-import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.Period;
 import java.util.LinkedHashSet;
@@ -16,10 +9,8 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.UUID;
 
-import javax.imageio.ImageIO;
-import javax.sql.rowset.serial.SerialBlob;
-
 import br.com.unify.matchable.common.UUIDv7Generator;
+import br.com.unify.matchable.common.image.OidImageService;
 import br.com.unify.matchable.user.dto.DisabilityOptionResponse;
 import br.com.unify.matchable.user.dto.LocationRequest;
 import br.com.unify.matchable.user.dto.LocationResponse;
@@ -27,6 +18,8 @@ import br.com.unify.matchable.user.dto.LookupOptionResponse;
 import br.com.unify.matchable.user.dto.ProfileCompletionResponse;
 import br.com.unify.matchable.user.dto.ProfileOptionsResponse;
 import br.com.unify.matchable.user.dto.SimilarityOptionResponse;
+import br.com.unify.matchable.user.dto.UserPublicProfileGalleryImagesResponse;
+import br.com.unify.matchable.user.dto.UserPublicProfileResponse;
 import br.com.unify.matchable.user.dto.UserProfileImageResponse;
 import br.com.unify.matchable.user.dto.UserProfileImagesResponse;
 import br.com.unify.matchable.user.dto.UserMatchPreferencesResponse;
@@ -42,6 +35,8 @@ import br.com.unify.matchable.user.entity.EnergyLevel;
 import br.com.unify.matchable.user.entity.Gender;
 import br.com.unify.matchable.user.entity.InterestType;
 import br.com.unify.matchable.user.entity.LifestyleType;
+import br.com.unify.matchable.user.entity.LoveLanguage;
+import br.com.unify.matchable.user.entity.Pronoun;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserCoordinates;
 import br.com.unify.matchable.user.entity.UserMatchPreference;
@@ -53,23 +48,25 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
-import net.coobird.thumbnailator.Thumbnails;
 
 @ApplicationScoped
 public class UserProfileServiceImplementation implements UserProfileService {
 
     private static final int MINIMUM_PREFERRED_AGE = 18;
     private static final int MAX_ACTIVE_GALLERY_IMAGES = 5;
-    private static final double IMAGE_OUTPUT_QUALITY = 0.85d;
     private static final String IMAGE_NOT_FOUND_MESSAGE = "Imagem não encontrada";
+    private static final String PUBLIC_PROFILE_NOT_FOUND_MESSAGE = "Perfil público não encontrado";
+    private static final String PUBLIC_GALLERY_IMAGE_NOT_FOUND_MESSAGE = "Imagem pública não encontrada";
     private static final String IMAGE_DOWNLOAD_URL_PREFIX = "/users/me/profile/images/";
 
     private static final String GENDER_FIELD = "gênero";
+    private static final String PRONOUNS_FIELD = "pronomes";
     private static final String DISABILITY_FIELD = "tipo de deficiência";
     private static final String ACCESSIBILITY_NEED_FIELD = "necessidade de acessibilidade";
     private static final String AUTONOMY_LEVEL_FIELD = "nível de autonomia";
     private static final String COMMUNICATION_FORM_FIELD = "forma de comunicação";
     private static final String LIFESTYLE_FIELD = "estilo de vida";
+    private static final String LOVE_LANGUAGE_FIELD = "linguagem do amor";
     private static final String ENERGY_LEVEL_FIELD = "ritmo de energia";
     private static final String INTEREST_FIELD = "interesse";
     private static final String CONNECTION_TYPE_FIELD = "tipo de conexão";
@@ -77,6 +74,9 @@ public class UserProfileServiceImplementation implements UserProfileService {
 
     @Inject
     EntityManager entityManager;
+
+    @Inject
+    OidImageService oidImageService;
 
     @Override
     public UserProfileResponse getProfile(User user) {
@@ -97,6 +97,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
         UserProfile profile = findOrCreateProfile(user);
         profile.bio = normalizeText(request.bio());
         profile.gender = resolveReference(request.genderId(), Gender.class, GENDER_FIELD);
+        profile.pronouns = resolveReference(request.pronounsId(), Pronoun.class, PRONOUNS_FIELD);
         replaceSet(profile.disabilities, resolveReferenceSet(request.disabilityIds(), Disability.class, DISABILITY_FIELD));
         replaceSet(
                 profile.accessibilityNeeds,
@@ -108,6 +109,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 resolveReferenceSet(request.communicationFormIds(), CommunicationForm.class, COMMUNICATION_FORM_FIELD)
         );
         replaceSet(profile.lifestyleTypes, resolveReferenceSet(request.lifestyleTypeIds(), LifestyleType.class, LIFESTYLE_FIELD));
+            replaceSet(profile.loveLanguages, resolveReferenceSet(request.loveLanguageIds(), LoveLanguage.class, LOVE_LANGUAGE_FIELD));
         profile.energyLevel = resolveReference(request.energyLevelId(), EnergyLevel.class, ENERGY_LEVEL_FIELD);
         replaceSet(profile.interestTypes, resolveReferenceSet(request.interestTypeIds(), InterestType.class, INTEREST_FIELD));
         replaceActiveLocation(profile, request.location());
@@ -145,6 +147,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
         preference.accessibilityNeedSimilarity = request.accessibilityNeedSimilarity();
         preference.autonomyCompatibility = request.autonomyCompatibility();
         preference.lifestyleSimilarity = request.lifestyleSimilarity();
+        preference.loveLanguageSimilarity = request.loveLanguageSimilarity();
         preference.energyLevelSimilarity = request.energyLevelSimilarity();
         Integer minAge = validatePreferredAge(request.minAge(), "A idade mínima desejada");
         Integer maxAge = validatePreferredAge(request.maxAge(), "A idade máxima desejada");
@@ -169,19 +172,27 @@ public class UserProfileServiceImplementation implements UserProfileService {
         List<String> missingProfileFields = new java.util.ArrayList<>();
         if (profile == null) {
             missingProfileFields.add("gênero");
+            missingProfileFields.add("pronomes");
             missingProfileFields.add("tipo de deficiência");
             missingProfileFields.add("forma de comunicação");
             missingProfileFields.add("estilo de vida");
+            missingProfileFields.add("linguagens do amor");
             missingProfileFields.add("interesses");
         } else {
             if (profile.gender == null) {
                 missingProfileFields.add("gênero");
+            }
+            if (profile.pronouns == null) {
+                missingProfileFields.add("pronomes");
             }
             if (profile.communicationForms == null || profile.communicationForms.isEmpty()) {
                 missingProfileFields.add("forma de comunicação");
             }
             if (profile.lifestyleTypes == null || profile.lifestyleTypes.isEmpty()) {
                 missingProfileFields.add("estilo de vida");
+            }
+            if (profile.loveLanguages == null || profile.loveLanguages.isEmpty()) {
+                missingProfileFields.add("linguagens do amor");
             }
             if (profile.interestTypes == null || profile.interestTypes.isEmpty()) {
                 missingProfileFields.add("interesses");
@@ -193,6 +204,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
             missingMatchFields.add("distância máxima do match");
             missingMatchFields.add("tipo de conexão");
             missingMatchFields.add("estilo de vida preferido");
+            missingMatchFields.add("linguagem do amor preferida");
             missingMatchFields.add("gênero desejado");
         } else {
             if (preference.maxMatchDistanceKm == null) {
@@ -203,6 +215,9 @@ public class UserProfileServiceImplementation implements UserProfileService {
             }
             if (preference.lifestyleSimilarity == null) {
                 missingMatchFields.add("estilo de vida preferido");
+            }
+            if (preference.loveLanguageSimilarity == null) {
+                missingMatchFields.add("linguagem do amor preferida");
             }
             if (preference.desiredGenders == null || preference.desiredGenders.isEmpty()) {
                 missingMatchFields.add("gênero desejado");
@@ -226,6 +241,9 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 Gender.<Gender>listAll(Sort.by("id")).stream()
                         .map(gender -> toOption(gender.id, gender.description))
                         .toList(),
+            Pronoun.<Pronoun>listAll(Sort.by("id")).stream()
+                .map(pronoun -> toOption(pronoun.id, pronoun.description))
+                .toList(),
                 Disability.<Disability>listAll(Sort.by("id")).stream()
                         .map(disability -> new DisabilityOptionResponse(disability.id, disability.description, disability.ionicIcon))
                         .toList(),
@@ -241,6 +259,9 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 LifestyleType.<LifestyleType>listAll(Sort.by("id")).stream()
                         .map(type -> toOption(type.id, type.description))
                         .toList(),
+                LoveLanguage.<LoveLanguage>listAll(Sort.by("id")).stream()
+                    .map(type -> toOption(type.id, type.description))
+                    .toList(),
                 EnergyLevel.<EnergyLevel>listAll(Sort.by("id")).stream()
                         .map(level -> toOption(level.id, level.description))
                         .toList(),
@@ -259,6 +280,33 @@ public class UserProfileServiceImplementation implements UserProfileService {
     }
 
     @Override
+    public UserPublicProfileResponse getPublicProfile(UUID userProfileId) {
+        UserProfile profile = findPublicProfile(userProfileId);
+        return toPublicProfileResponse(profile);
+    }
+
+    @Override
+    public UserPublicProfileGalleryImagesResponse getPublicGalleryImages(UUID userProfileId) {
+        UserProfile profile = findPublicProfile(userProfileId);
+        return new UserPublicProfileGalleryImagesResponse(profile.id, listPublicGalleryImageIds(profile));
+    }
+
+    @Override
+    public byte[] getPublicGalleryImageContent(UUID userProfileId, UUID imageId) {
+        if (imageId == null) {
+            throw new IllegalArgumentException("Informe o identificador da imagem pública");
+        }
+
+        UserProfile profile = findPublicProfile(userProfileId);
+        UserProfileImage image = UserProfileImage.findActiveByIdAndUserProfile(imageId, profile);
+        if (image == null || image.profilePicture) {
+            throw new NoSuchElementException(PUBLIC_GALLERY_IMAGE_NOT_FOUND_MESSAGE);
+        }
+
+        return readStoredImage(image);
+    }
+
+    @Override
     public UserProfileImagesResponse getActiveImages(User user) {
         UserProfile profile = UserProfile.findByUser(user);
         if (profile == null) {
@@ -273,7 +321,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
         UserProfile profile = findOrCreateProfile(user);
         ensureProfilePersisted(profile);
 
-        byte[] compressedImage = compressImage(imageBytes);
+        byte[] compressedImage = oidImageService.compressToJpeg(imageBytes);
         deactivateCurrentProfilePicture(profile);
         createImage(profile, compressedImage, true);
         return toImagesResponse(profile);
@@ -291,7 +339,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
             );
         }
 
-        byte[] compressedImage = compressImage(imageBytes);
+        byte[] compressedImage = oidImageService.compressToJpeg(imageBytes);
         createImage(profile, compressedImage, false);
         return toImagesResponse(profile);
     }
@@ -368,18 +416,14 @@ public class UserProfileServiceImplementation implements UserProfileService {
     }
 
     private void createImage(UserProfile profile, byte[] compressedImage, boolean profilePicture) {
-        try {
-            UserProfileImage image = new UserProfileImage();
-            image.id = UUIDv7Generator.generate();
-            image.userProfile = profile;
-            image.oid = new SerialBlob(compressedImage);
-            image.profilePicture = profilePicture;
-            image.active = true;
-            image.persist();
-            profile.images.add(0, image);
-        } catch (SQLException exception) {
-            throw new IllegalStateException("Não foi possível preparar a imagem para armazenamento", exception);
-        }
+        UserProfileImage image = new UserProfileImage();
+        image.id = UUIDv7Generator.generate();
+        image.userProfile = profile;
+        image.oid = oidImageService.toOidBlob(compressedImage);
+        image.profilePicture = profilePicture;
+        image.active = true;
+        image.persist();
+        profile.images.add(0, image);
     }
 
     private void replaceActiveLocation(UserProfile profile, LocationRequest location) {
@@ -490,50 +534,27 @@ public class UserProfileServiceImplementation implements UserProfileService {
         return normalized.isEmpty() ? null : normalized;
     }
 
-    private byte[] compressImage(byte[] imageBytes) {
-        if (imageBytes == null || imageBytes.length == 0) {
-            throw new IllegalArgumentException("Nenhuma imagem foi enviada no campo 'image'");
-        }
-
-        try (ByteArrayInputStream inputStream = new ByteArrayInputStream(imageBytes);
-             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
-            BufferedImage sourceImage = ImageIO.read(inputStream);
-            if (sourceImage == null) {
-                throw new IllegalArgumentException("O arquivo enviado não é uma imagem JPEG ou PNG válida");
-            }
-
-            Thumbnails.of(normalizeImage(sourceImage))
-                    .scale(1.0d)
-                    .outputFormat("jpg")
-                    .outputQuality(IMAGE_OUTPUT_QUALITY)
-                    .toOutputStream(outputStream);
-
-            return outputStream.toByteArray();
-        } catch (IOException exception) {
-            throw new IllegalArgumentException("Não foi possível processar a imagem enviada", exception);
-        }
-    }
-
-    private BufferedImage normalizeImage(BufferedImage sourceImage) {
-        if (!sourceImage.getColorModel().hasAlpha()) {
-            return sourceImage;
-        }
-
-        BufferedImage normalized = new BufferedImage(sourceImage.getWidth(), sourceImage.getHeight(), BufferedImage.TYPE_INT_RGB);
-        Graphics2D graphics = normalized.createGraphics();
-        graphics.setColor(Color.WHITE);
-        graphics.fillRect(0, 0, normalized.getWidth(), normalized.getHeight());
-        graphics.drawImage(sourceImage, 0, 0, null);
-        graphics.dispose();
-        return normalized;
-    }
-
     private byte[] readStoredImage(UserProfileImage image) {
-        try {
-            return image.oid.getBytes(1, (int) image.oid.length());
-        } catch (SQLException exception) {
-            throw new IllegalStateException("Não foi possível ler a imagem armazenada", exception);
+        return oidImageService.readOidBlob(image.oid);
+    }
+
+    private UserProfile findPublicProfile(UUID userProfileId) {
+        if (userProfileId == null) {
+            throw new IllegalArgumentException("Informe o parâmetro de consulta 'userProfileId'");
         }
+
+        UserProfile profile = UserProfile.findById(userProfileId);
+        if (profile == null || profile.user == null || !profile.user.verified) {
+            throw new NoSuchElementException(PUBLIC_PROFILE_NOT_FOUND_MESSAGE);
+        }
+
+        return profile;
+    }
+
+    private List<UUID> listPublicGalleryImageIds(UserProfile profile) {
+        return UserProfileImage.listActiveGalleryImages(profile).stream()
+                .map(image -> image.id)
+                .toList();
     }
 
     private UserProfileResponse toProfileResponse(UserProfile profile) {
@@ -546,6 +567,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
             calculateAge(profile.user),
                 profile.bio,
                 profile.gender == null ? null : toOption(profile.gender.id, profile.gender.description),
+            profile.pronouns == null ? null : toOption(profile.pronouns.id, profile.pronouns.description),
                 profile.disabilities.stream()
                         .map(disability -> new DisabilityOptionResponse(disability.id, disability.description, disability.ionicIcon))
                         .toList(),
@@ -559,6 +581,9 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 profile.lifestyleTypes.stream()
                         .map(type -> toOption(type.id, type.description))
                         .toList(),
+                profile.loveLanguages.stream()
+                    .map(type -> toOption(type.id, type.description))
+                    .toList(),
                 profile.energyLevel == null ? null : toOption(profile.energyLevel.id, profile.energyLevel.description),
                 profile.interestTypes.stream()
                         .map(type -> toOption(type.id, type.description))
@@ -568,6 +593,38 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 imagesResponse.galleryImages()
         );
     }
+
+            private UserPublicProfileResponse toPublicProfileResponse(UserProfile profile) {
+            return new UserPublicProfileResponse(
+                profile.id,
+                profile.user == null ? null : profile.user.name,
+                calculateAge(profile.user),
+                profile.bio,
+                profile.gender == null ? null : toOption(profile.gender.id, profile.gender.description),
+                profile.pronouns == null ? null : toOption(profile.pronouns.id, profile.pronouns.description),
+                profile.disabilities.stream()
+                    .map(disability -> new DisabilityOptionResponse(disability.id, disability.description, disability.ionicIcon))
+                    .toList(),
+                profile.accessibilityNeeds.stream()
+                    .map(need -> toOption(need.id, need.description))
+                    .toList(),
+                profile.autonomyLevel == null ? null : toOption(profile.autonomyLevel.id, profile.autonomyLevel.description),
+                profile.communicationForms.stream()
+                    .map(form -> toOption(form.id, form.description))
+                    .toList(),
+                profile.lifestyleTypes.stream()
+                    .map(type -> toOption(type.id, type.description))
+                    .toList(),
+                profile.loveLanguages.stream()
+                    .map(type -> toOption(type.id, type.description))
+                    .toList(),
+                profile.energyLevel == null ? null : toOption(profile.energyLevel.id, profile.energyLevel.description),
+                profile.interestTypes.stream()
+                    .map(type -> toOption(type.id, type.description))
+                    .toList(),
+                listPublicGalleryImageIds(profile)
+            );
+            }
 
     private Integer calculateAge(User user) {
         if (user == null || user.birthdate == null) {
@@ -608,6 +665,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 preference.accessibilityNeedSimilarity == null ? null : preference.accessibilityNeedSimilarity.name(),
                 preference.autonomyCompatibility == null ? null : preference.autonomyCompatibility.name(),
                 preference.lifestyleSimilarity == null ? null : preference.lifestyleSimilarity.name(),
+                preference.loveLanguageSimilarity == null ? null : preference.loveLanguageSimilarity.name(),
                 preference.energyLevelSimilarity == null ? null : preference.energyLevelSimilarity.name(),
                 preference.minAge,
                 preference.maxAge,
@@ -630,9 +688,11 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 null,
                 null,
                 null,
+                null,
                 List.of(),
                 List.of(),
                 null,
+                List.of(),
                 List.of(),
                 List.of(),
                 null,
@@ -644,7 +704,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
     }
 
     private UserMatchPreferencesResponse emptyMatchPreferencesResponse() {
-        return new UserMatchPreferencesResponse(null, null, null, null, null, null, null, null, null, List.of());
+        return new UserMatchPreferencesResponse(null, null, null, null, null, null, null, null, null, null, List.of());
     }
 
     private UserProfileImagesResponse emptyImagesResponse() {

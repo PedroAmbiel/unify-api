@@ -9,6 +9,7 @@ import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -23,7 +24,7 @@ public class ActiveConnection extends PanacheEntityBase {
     public UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_user", nullable = false)
+    @JoinColumn(name = "fk_user", nullable = false, foreignKey = @ForeignKey(name = "fk_active_connections_user"))
     public User user;
 
     @Column(name = "refresh_token", nullable = false, unique = true)
@@ -49,7 +50,7 @@ public class ActiveConnection extends PanacheEntityBase {
     }
 
     public static ActiveConnection findByRefreshTokenHash(String hash) {
-        return find("refreshTokenHash = ?1 and revoked = false", hash).firstResult();
+        return find("refreshToken = ?1 and revoked = false", hash).firstResult();
     }
 
     public static void revokeAllForUser(User user) {

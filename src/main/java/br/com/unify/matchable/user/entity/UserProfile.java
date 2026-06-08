@@ -11,6 +11,7 @@ import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
@@ -30,21 +31,27 @@ public class UserProfile extends PanacheEntityBase {
     public UUID id;
 
     @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_user", nullable = false, unique = true)
+    @JoinColumn(name = "fk_user", nullable = false, unique = true, foreignKey = @ForeignKey(name = "fk_user_profiles_user"))
     public User user;
 
     @Column(name = "bio")
     public String bio;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_gender")
+    @JoinColumn(name = "fk_gender", foreignKey = @ForeignKey(name = "fk_user_profiles_gender"))
     public Gender gender;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "fk_pronouns", foreignKey = @ForeignKey(name = "fk_user_profiles_pronouns"))
+    public Pronoun pronouns;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
         name = "user_profile_disabilities",
         joinColumns = @JoinColumn(name = "fk_user_profile"),
-        inverseJoinColumns = @JoinColumn(name = "fk_disability")
+        inverseJoinColumns = @JoinColumn(name = "fk_disability"),
+        foreignKey = @ForeignKey(name = "fk_user_profile_disabilities_user_profile"),
+        inverseForeignKey = @ForeignKey(name = "fk_user_profile_disabilities_disability")
     )
     @OrderBy("id")
     public Set<Disability> disabilities = new LinkedHashSet<>();
@@ -53,20 +60,24 @@ public class UserProfile extends PanacheEntityBase {
     @JoinTable(
         name = "user_profile_accessibility_needs",
         joinColumns = @JoinColumn(name = "fk_user_profile"),
-        inverseJoinColumns = @JoinColumn(name = "fk_accessibility_need")
+        inverseJoinColumns = @JoinColumn(name = "fk_accessibility_need"),
+        foreignKey = @ForeignKey(name = "fk_user_profile_accessibility_needs_user_profile"),
+        inverseForeignKey = @ForeignKey(name = "fk_user_profile_accessibility_needs_accessibility_need")
     )
     @OrderBy("id")
     public Set<AccessibilityNeed> accessibilityNeeds = new LinkedHashSet<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_autonomy_level")
+    @JoinColumn(name = "fk_autonomy_level", foreignKey = @ForeignKey(name = "fk_user_profiles_autonomy_level"))
     public AutonomyLevel autonomyLevel;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
         name = "user_profile_communication_forms",
         joinColumns = @JoinColumn(name = "fk_user_profile"),
-        inverseJoinColumns = @JoinColumn(name = "fk_communication_form")
+        inverseJoinColumns = @JoinColumn(name = "fk_communication_form"),
+        foreignKey = @ForeignKey(name = "fk_user_profile_communication_forms_user_profile"),
+        inverseForeignKey = @ForeignKey(name = "fk_user_profile_communication_forms_communication_form")
     )
     @OrderBy("id")
     public Set<CommunicationForm> communicationForms = new LinkedHashSet<>();
@@ -75,20 +86,35 @@ public class UserProfile extends PanacheEntityBase {
     @JoinTable(
         name = "user_profile_lifestyle_types",
         joinColumns = @JoinColumn(name = "fk_user_profile"),
-        inverseJoinColumns = @JoinColumn(name = "fk_lifestyle_type")
+        inverseJoinColumns = @JoinColumn(name = "fk_lifestyle_type"),
+        foreignKey = @ForeignKey(name = "fk_user_profile_lifestyle_types_user_profile"),
+        inverseForeignKey = @ForeignKey(name = "fk_user_profile_lifestyle_types_lifestyle_type")
     )
     @OrderBy("id")
     public Set<LifestyleType> lifestyleTypes = new LinkedHashSet<>();
 
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+        name = "user_profile_love_languages",
+        joinColumns = @JoinColumn(name = "fk_user_profile"),
+        inverseJoinColumns = @JoinColumn(name = "fk_love_language"),
+        foreignKey = @ForeignKey(name = "fk_user_profile_love_languages_user_profile"),
+        inverseForeignKey = @ForeignKey(name = "fk_user_profile_love_languages_love_language")
+    )
+    @OrderBy("id")
+    public Set<LoveLanguage> loveLanguages = new LinkedHashSet<>();
+
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_energy_level")
+    @JoinColumn(name = "fk_energy_level", foreignKey = @ForeignKey(name = "fk_user_profiles_energy_level"))
     public EnergyLevel energyLevel;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
         name = "user_profile_interest_types",
         joinColumns = @JoinColumn(name = "fk_user_profile"),
-        inverseJoinColumns = @JoinColumn(name = "fk_interest_type")
+        inverseJoinColumns = @JoinColumn(name = "fk_interest_type"),
+        foreignKey = @ForeignKey(name = "fk_user_profile_interest_types_user_profile"),
+        inverseForeignKey = @ForeignKey(name = "fk_user_profile_interest_types_interest_type")
     )
     @OrderBy("id")
     public Set<InterestType> interestTypes = new LinkedHashSet<>();

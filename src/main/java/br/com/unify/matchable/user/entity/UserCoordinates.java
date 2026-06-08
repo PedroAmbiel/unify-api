@@ -7,6 +7,7 @@ import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
@@ -28,7 +29,7 @@ public class UserCoordinates extends PanacheEntityBase {
     public UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_user_profile", nullable = false)
+        @JoinColumn(name = "fk_user_profile", nullable = false, foreignKey = @ForeignKey(name = "fk_user_coordinates_user_profile"))
     public UserProfile userProfile;
 
     @Column(name = "latitude", nullable = false, precision = 9, scale = 6)

@@ -9,6 +9,8 @@ import br.com.unify.matchable.user.dto.UserMatchPreferencesUpsertRequest;
 import br.com.unify.matchable.user.dto.UserProfileImagesResponse;
 import br.com.unify.matchable.user.dto.UserProfileResponse;
 import br.com.unify.matchable.user.dto.UserProfileUpsertRequest;
+import br.com.unify.matchable.user.dto.UserPublicProfileGalleryImagesResponse;
+import br.com.unify.matchable.user.dto.UserPublicProfileResponse;
 import br.com.unify.matchable.user.entity.User;
 
 public interface UserProfileService {
@@ -24,6 +26,12 @@ public interface UserProfileService {
     ProfileCompletionResponse getCompletionStatus(User user);
 
     ProfileOptionsResponse getProfileOptions();
+
+    UserPublicProfileResponse getPublicProfile(UUID userProfileId);
+
+    UserPublicProfileGalleryImagesResponse getPublicGalleryImages(UUID userProfileId);
+
+    byte[] getPublicGalleryImageContent(UUID userProfileId, UUID imageId);
 
     UserProfileImagesResponse getActiveImages(User user);
 

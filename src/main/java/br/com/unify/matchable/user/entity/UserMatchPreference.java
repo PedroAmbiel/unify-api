@@ -11,6 +11,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
@@ -29,11 +30,11 @@ public class UserMatchPreference extends PanacheEntityBase {
     public UUID id;
 
     @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_user_profile", nullable = false, unique = true)
+    @JoinColumn(name = "fk_user_profile", nullable = false, unique = true, foreignKey = @ForeignKey(name = "fk_user_match_preferences_user_profile"))
     public UserProfile userProfile;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_connection_type")
+    @JoinColumn(name = "fk_connection_type", foreignKey = @ForeignKey(name = "fk_user_match_preferences_connection_type"))
     public ConnectionType connectionType;
 
     @Enumerated(EnumType.STRING)
@@ -47,6 +48,10 @@ public class UserMatchPreference extends PanacheEntityBase {
     @Enumerated(EnumType.STRING)
     @Column(name = "lifestyle_similarity")
     public SimilarityPreference lifestyleSimilarity;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "love_language_similarity")
+    public SimilarityPreference loveLanguageSimilarity;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "energy_level_similarity")
@@ -65,7 +70,9 @@ public class UserMatchPreference extends PanacheEntityBase {
     @JoinTable(
             name = "user_match_preference_desired_genders",
             joinColumns = @JoinColumn(name = "fk_user_match_preference"),
-            inverseJoinColumns = @JoinColumn(name = "fk_gender")
+            inverseJoinColumns = @JoinColumn(name = "fk_gender"),
+            foreignKey = @ForeignKey(name = "fk_user_match_preference_desired_genders_user_match_preference"),
+            inverseForeignKey = @ForeignKey(name = "fk_user_match_preference_desired_genders_gender")
     )
     @OrderBy("id")
     public Set<Gender> desiredGenders = new LinkedHashSet<>();
