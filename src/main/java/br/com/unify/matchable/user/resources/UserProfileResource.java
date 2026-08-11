@@ -11,6 +11,8 @@ import org.jboss.resteasy.reactive.multipart.FileUpload;
 
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
+import br.com.unify.matchable.common.image.ImageResponses;
+import br.com.unify.matchable.common.exceptions.PayloadTooLargeException;
 import br.com.unify.matchable.user.dto.UserMatchPreferencesUpsertRequest;
 import br.com.unify.matchable.user.dto.UserProfileUpsertRequest;
 import br.com.unify.matchable.user.entity.User;
@@ -27,7 +29,9 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Request;
 import jakarta.ws.rs.core.Response;
 
 @Path("/users/me")
@@ -41,6 +45,15 @@ public class UserProfileResource {
 
     @Inject
     UserProfileService userProfileService;
+
+    @Context
+    Request request;
+
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "unify.upload.image.max-bytes",
+            defaultValue = "5242880"
+    )
+    long maxImageBytes;
 
     @GET
     @Path("/profile")
@@ -168,7 +181,7 @@ public class UserProfileResource {
         }
 
         try {
-            return Response.ok(userProfileService.getPublicGalleryImageContent(userProfileId, imageId)).type("image/jpeg").build();
+            return ImageResponses.jpeg(userProfileService.getPublicGalleryImageContent(userProfileId, imageId), request);
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
@@ -199,6 +212,8 @@ public class UserProfileResource {
 
         try {
             return Response.ok(userProfileService.uploadProfilePicture(user, readUploadedBytes(image))).build();
+        } catch (PayloadTooLargeException exception) {
+            return payloadTooLargeResponse(exception.getMessage());
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
@@ -218,6 +233,8 @@ public class UserProfileResource {
 
         try {
             return Response.ok(userProfileService.uploadGalleryImage(user, readUploadedBytes(image))).build();
+        } catch (PayloadTooLargeException exception) {
+            return payloadTooLargeResponse(exception.getMessage());
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
@@ -252,7 +269,7 @@ public class UserProfileResource {
         }
 
         try {
-            return Response.ok(userProfileService.getImageContent(user, imageId)).type("image/jpeg").build();
+            return ImageResponses.jpeg(userProfileService.getImageContent(user, imageId), request);
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }
@@ -265,6 +282,13 @@ public class UserProfileResource {
     protected byte[] readUploadedBytes(FileUpload image) {
         if (image == null || image.uploadedFile() == null) {
             throw new IllegalArgumentException("Nenhuma imagem foi enviada no campo 'image'");
+        }
+
+        if (image.size() > maxImageBytes) {
+            throw new PayloadTooLargeException(
+                    "A imagem enviada tem " + image.size()
+                            + " bytes e o limite e de " + maxImageBytes + " bytes"
+            );
         }
 
         try {
@@ -299,6 +323,12 @@ public class UserProfileResource {
     private Response validationErrorResponse(String details) {
         return Response.status(Response.Status.BAD_REQUEST)
                 .entity(ErrorResponse.of(ErrorCode.VALIDATION_INVALID_FORMAT, details))
+                .build();
+    }
+
+    private Response payloadTooLargeResponse(String details) {
+        return Response.status(ErrorCode.VALIDATION_FILE_TOO_LARGE.getHttpStatus())
+                .entity(ErrorResponse.of(ErrorCode.VALIDATION_FILE_TOO_LARGE, details))
                 .build();
     }
 }

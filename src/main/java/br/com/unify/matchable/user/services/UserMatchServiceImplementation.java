@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import br.com.unify.matchable.common.UUIDv7Generator;
+import br.com.unify.matchable.common.dto.PageParams;
 import br.com.unify.matchable.user.dto.MatchDecisionRequest;
 import br.com.unify.matchable.user.dto.MatchDecisionResponse;
 import br.com.unify.matchable.user.dto.MutualMatchPageResponse;
@@ -53,9 +54,6 @@ import jakarta.transaction.Transactional;
 @ApplicationScoped
 public class UserMatchServiceImplementation implements UserMatchService {
 
-    private static final int DEFAULT_PAGE = 0;
-    private static final int DEFAULT_PAGE_SIZE = 20;
-    private static final int MAX_PAGE_SIZE = 100;
     private static final int TARGET_MATCH_COUNT = 50;
     private static final int PRESELECTION_LIMIT = 250;
     private static final int MINIMUM_DISCOVERY_SCORE = 30;
@@ -63,8 +61,6 @@ public class UserMatchServiceImplementation implements UserMatchService {
     private static final int MAX_AGE_EXPANSION_YEARS = 10;
     private static final int AGE_EXPANSION_STEP_YEARS = 5;
     private static final int MINIMUM_ALLOWED_AGE = 18;
-    private static final String INVALID_PAGE_MESSAGE = "O parâmetro 'page' deve ser maior ou igual a zero";
-    private static final String INVALID_SIZE_MESSAGE = "O parâmetro 'size' deve estar entre 1 e " + MAX_PAGE_SIZE;
     private static final String MATCH_IMAGE_DOWNLOAD_URL_PREFIX = "/users/me/matches/images/";
     private static final String MATCH_IMAGE_NOT_FOUND_MESSAGE = "Imagem de match não encontrada";
 
@@ -1046,19 +1042,11 @@ public class UserMatchServiceImplementation implements UserMatchService {
     }
 
     private int validatePage(Integer page) {
-        int resolvedPage = page == null ? DEFAULT_PAGE : page;
-        if (resolvedPage < 0) {
-            throw new IllegalArgumentException(INVALID_PAGE_MESSAGE);
-        }
-        return resolvedPage;
+        return PageParams.resolvePage(page);
     }
 
     private int validateSize(Integer size) {
-        int resolvedSize = size == null ? DEFAULT_PAGE_SIZE : size;
-        if (resolvedSize < 1 || resolvedSize > MAX_PAGE_SIZE) {
-            throw new IllegalArgumentException(INVALID_SIZE_MESSAGE);
-        }
-        return resolvedSize;
+        return PageParams.resolveSize(size);
     }
 
     private record CandidateSearchRow(UUID profileId, double distanceKm) {

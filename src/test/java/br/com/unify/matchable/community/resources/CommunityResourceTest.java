@@ -2,6 +2,7 @@ package br.com.unify.matchable.community.resources;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,14 +14,13 @@ import org.junit.jupiter.api.Test;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 
 import br.com.unify.matchable.common.dto.ErrorResponse;
+import br.com.unify.matchable.common.dto.PageResponse;
 import br.com.unify.matchable.community.dto.CommunityAuthorResponse;
 import br.com.unify.matchable.community.dto.CommunityCommentCreateRequest;
 import br.com.unify.matchable.community.dto.CommunityCommentResponse;
-import br.com.unify.matchable.community.dto.CommunityCommentsResponse;
 import br.com.unify.matchable.community.dto.CommunityFeedResponse;
 import br.com.unify.matchable.community.dto.CommunityLikeResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberHeaderResponse;
-import br.com.unify.matchable.community.dto.CommunityMembersResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberRoleUpdateRequest;
 import br.com.unify.matchable.community.dto.CommunityMembershipResponse;
@@ -101,29 +101,111 @@ class CommunityResourceTest {
         UUID communityId = UUID.randomUUID();
         service.feedResponse = new CommunityFeedResponse(
                 buildCommunitySummary(communityId),
-                List.of(new CommunityPostResponse(
-                        UUID.randomUUID(),
-                        new CommunityAuthorResponse(UUID.randomUUID(), "Pedro Ambiel", null),
-                        "há 1 hora",
-                        "Primeira publicação",
-                        null,
-                        3L,
-                        1L,
-                        true,
-                        false
-                ))
+                PageResponse.of(List.of(buildPost("Primeira publicação")), 0, 20, 1L)
         );
 
         TestableCommunityResource resource = new TestableCommunityResource();
         resource.communityService = service;
         resource.currentUser = buildUser();
 
-        Response response = resource.getFeed(communityId);
+        Response response = resource.getFeed(communityId, null, null);
 
         assertEquals(200, response.getStatus());
         assertEquals(communityId, service.capturedCommunityId);
         CommunityFeedResponse body = assertInstanceOf(CommunityFeedResponse.class, response.getEntity());
-        assertEquals("Primeira publicação", body.posts().getFirst().body());
+        assertEquals("Primeira publicação", body.posts().content().getFirst().body());
+    }
+
+    @Test
+    void getFeedReturnsPaginatedPostsEnvelope() {
+        StubCommunityService service = new StubCommunityService();
+        UUID communityId = UUID.randomUUID();
+        service.feedResponse = new CommunityFeedResponse(
+                buildCommunitySummary(communityId),
+                PageResponse.of(List.of(buildPost("Publicação da página 1")), 1, 2, 5L)
+        );
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getFeed(communityId, 1, 2);
+
+        assertEquals(200, response.getStatus());
+        assertEquals(1, service.capturedPage);
+        assertEquals(2, service.capturedSize);
+        CommunityFeedResponse body = assertInstanceOf(CommunityFeedResponse.class, response.getEntity());
+        PageResponse<CommunityPostResponse> posts = body.posts();
+        assertEquals(1, posts.content().size());
+        assertEquals(1, posts.page());
+        assertEquals(2, posts.size());
+        assertEquals(5L, posts.totalElements());
+        assertEquals(3, posts.totalPages());
+        assertTrue(posts.hasNext());
+    }
+
+    @Test
+    void getFeedReturnsBadRequestWhenSizeExceedsMaximum() {
+        StubCommunityService service = new StubCommunityService();
+        service.validationException = new IllegalArgumentException("O parâmetro 'size' deve estar entre 1 e 100");
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getFeed(UUID.randomUUID(), 0, 1000);
+
+        assertEquals(400, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("VALIDATION_INVALID_FORMAT", body.error());
+    }
+
+    @Test
+    void getCommentsReturnsBadRequestWhenSizeExceedsMaximum() {
+        StubCommunityService service = new StubCommunityService();
+        service.validationException = new IllegalArgumentException("O parâmetro 'size' deve estar entre 1 e 100");
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getComments(UUID.randomUUID(), 0, 1000);
+
+        assertEquals(400, response.getStatus());
+        assertEquals("VALIDATION_INVALID_FORMAT", assertInstanceOf(ErrorResponse.class, response.getEntity()).error());
+    }
+
+    @Test
+    void getCommentsReturnsPaginatedEnvelope() {
+        StubCommunityService service = new StubCommunityService();
+        UUID postId = UUID.randomUUID();
+        service.commentsResponse = PageResponse.of(
+                List.of(new CommunityCommentResponse(
+                        UUID.randomUUID(),
+                        new CommunityAuthorResponse(UUID.randomUUID(), "Larissa Costa", null),
+                        "há 2 minutos",
+                        "Primeiro comentário",
+                        false
+                )),
+                0,
+                20,
+                1L
+        );
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getComments(postId, null, null);
+
+        assertEquals(200, response.getStatus());
+        assertEquals(postId, service.capturedPostId);
+        @SuppressWarnings("unchecked")
+        PageResponse<CommunityCommentResponse> body = assertInstanceOf(PageResponse.class, response.getEntity());
+        assertEquals("Primeiro comentário", body.content().getFirst().body());
+        assertEquals(1L, body.totalElements());
+        assertEquals(1, body.totalPages());
+        assertFalse(body.hasNext());
     }
 
     @Test
@@ -165,27 +247,64 @@ class CommunityResourceTest {
         StubCommunityService service = new StubCommunityService();
         UUID communityId = UUID.randomUUID();
         UUID userProfileId = UUID.randomUUID();
-        service.membersResponse = new CommunityMembersResponse(
-                communityId,
+        service.membersResponse = PageResponse.of(
                 List.of(new CommunityMemberHeaderResponse(
                         userProfileId,
                         "Larissa Costa",
                         "/communities/users/123/avatar",
                         CommunityMemberRole.MEMBER
-                ))
+                )),
+                0,
+                20,
+                1L
         );
 
         TestableCommunityResource resource = new TestableCommunityResource();
         resource.communityService = service;
         resource.currentUser = buildUser();
 
-        Response response = resource.listMembers(communityId);
+        Response response = resource.listMembers(communityId, null, null);
 
         assertEquals(200, response.getStatus());
         assertEquals(communityId, service.capturedCommunityId);
-        CommunityMembersResponse body = assertInstanceOf(CommunityMembersResponse.class, response.getEntity());
-        assertEquals(userProfileId, body.members().getFirst().userProfileId());
-        assertEquals("Larissa Costa", body.members().getFirst().name());
+        @SuppressWarnings("unchecked")
+        PageResponse<CommunityMemberHeaderResponse> body = assertInstanceOf(PageResponse.class, response.getEntity());
+        assertEquals(userProfileId, body.content().getFirst().userProfileId());
+        assertEquals("Larissa Costa", body.content().getFirst().name());
+        assertEquals(0, body.page());
+        assertEquals(20, body.size());
+        assertEquals(1L, body.totalElements());
+        assertFalse(body.hasNext());
+    }
+
+    @Test
+    void listMembersReturnsBadRequestWhenSizeExceedsMaximum() {
+        StubCommunityService service = new StubCommunityService();
+        service.validationException = new IllegalArgumentException("O parâmetro 'size' deve estar entre 1 e 100");
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.listMembers(UUID.randomUUID(), 0, 1000);
+
+        assertEquals(400, response.getStatus());
+        assertEquals("VALIDATION_INVALID_FORMAT", assertInstanceOf(ErrorResponse.class, response.getEntity()).error());
+    }
+
+    @Test
+    void listCommunitiesReturnsBadRequestWhenSizeExceedsMaximum() {
+        StubCommunityService service = new StubCommunityService();
+        service.validationException = new IllegalArgumentException("O parâmetro 'size' deve estar entre 1 e 100");
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.listCommunities(0, 1000);
+
+        assertEquals(400, response.getStatus());
+        assertEquals("VALIDATION_INVALID_FORMAT", assertInstanceOf(ErrorResponse.class, response.getEntity()).error());
     }
 
     @Test
@@ -335,6 +454,20 @@ class CommunityResourceTest {
         assertEquals(postId, service.capturedPostId);
     }
 
+    private CommunityPostResponse buildPost(String body) {
+        return new CommunityPostResponse(
+                UUID.randomUUID(),
+                new CommunityAuthorResponse(UUID.randomUUID(), "Pedro Ambiel", null),
+                "há 1 hora",
+                body,
+                null,
+                3L,
+                1L,
+                true,
+                false
+        );
+    }
+
     private CommunitySummaryResponse buildCommunitySummary(UUID communityId) {
         UUID ownerId = UUID.randomUUID();
         return new CommunitySummaryResponse(
@@ -390,10 +523,10 @@ class CommunityResourceTest {
         private CommunitySummaryResponse summaryResponse;
         private CommunityFeedResponse feedResponse;
         private CommunityMembershipResponse membershipResponse;
-        private CommunityMembersResponse membersResponse;
+        private PageResponse<CommunityMemberHeaderResponse> membersResponse;
         private CommunityMemberResponse memberResponse;
         private CommunityPostResponse postResponse;
-        private CommunityCommentsResponse commentsResponse;
+        private PageResponse<CommunityCommentResponse> commentsResponse;
         private CommunityCommentResponse commentResponse;
         private CommunityLikeResponse likeResponse;
         private byte[] mediaBytes;
@@ -455,9 +588,14 @@ class CommunityResourceTest {
         }
 
         @Override
-        public CommunityFeedResponse getFeed(User user, UUID communityId) {
+        public CommunityFeedResponse getFeed(User user, UUID communityId, Integer page, Integer size) {
             capturedUser = user;
             capturedCommunityId = communityId;
+            capturedPage = page;
+            capturedSize = size;
+            if (validationException != null) {
+                throw validationException;
+            }
             if (notFoundException != null) {
                 throw notFoundException;
             }
@@ -491,9 +629,11 @@ class CommunityResourceTest {
         }
 
         @Override
-        public CommunityMembersResponse listMembers(User user, UUID communityId) {
+        public PageResponse<CommunityMemberHeaderResponse> listMembers(User user, UUID communityId, Integer page, Integer size) {
             capturedUser = user;
             capturedCommunityId = communityId;
+            capturedPage = page;
+            capturedSize = size;
             if (validationException != null) {
                 throw validationException;
             }
@@ -598,9 +738,11 @@ class CommunityResourceTest {
         }
 
         @Override
-        public CommunityCommentsResponse getComments(User user, UUID postId) {
+        public PageResponse<CommunityCommentResponse> getComments(User user, UUID postId, Integer page, Integer size) {
             capturedUser = user;
             capturedPostId = postId;
+            capturedPage = page;
+            capturedSize = size;
             if (validationException != null) {
                 throw validationException;
             }

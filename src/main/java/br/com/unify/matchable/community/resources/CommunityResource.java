@@ -11,8 +11,9 @@ import org.jboss.resteasy.reactive.multipart.FileUpload;
 
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
+import br.com.unify.matchable.common.exceptions.PayloadTooLargeException;
+import br.com.unify.matchable.common.image.ImageResponses;
 import br.com.unify.matchable.community.dto.CommunityCommentCreateRequest;
-import br.com.unify.matchable.community.dto.CommunityMembersResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberRoleUpdateRequest;
 import br.com.unify.matchable.community.services.CommunityService;
 import br.com.unify.matchable.user.entity.User;
@@ -28,7 +29,9 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Request;
 import jakarta.ws.rs.core.Response;
 
 @Path("/communities")
@@ -42,6 +45,15 @@ public class CommunityResource {
 
     @Inject
     CommunityService communityService;
+
+    @Context
+    Request request;
+
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "unify.upload.image.max-bytes",
+            defaultValue = "5242880"
+    )
+    long maxImageBytes;
 
     @GET
     @Transactional
@@ -95,6 +107,8 @@ public class CommunityResource {
             return Response.status(Response.Status.CREATED)
                     .entity(communityService.createCommunity(user, name, description, readOptionalUploadedBytes(icon)))
                     .build();
+        } catch (PayloadTooLargeException exception) {
+            return payloadTooLargeResponse(exception.getMessage());
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
@@ -126,14 +140,18 @@ public class CommunityResource {
     @GET
     @Path("/feed")
     @Transactional
-    public Response getFeed(@QueryParam("communityId") UUID communityId) {
+    public Response getFeed(
+            @QueryParam("communityId") UUID communityId,
+            @QueryParam("page") Integer page,
+            @QueryParam("size") Integer size
+    ) {
         User user = findCurrentUser();
         if (user == null) {
             return userNotFoundResponse();
         }
 
         try {
-            return Response.ok(communityService.getFeed(user, communityId)).build();
+            return Response.ok(communityService.getFeed(user, communityId, page, size)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
@@ -184,15 +202,18 @@ public class CommunityResource {
     @GET
     @Path("/{communityId}/members")
     @Transactional
-    public Response listMembers(@PathParam("communityId") UUID communityId) {
+    public Response listMembers(
+            @PathParam("communityId") UUID communityId,
+            @QueryParam("page") Integer page,
+            @QueryParam("size") Integer size
+    ) {
         User user = findCurrentUser();
         if (user == null) {
             return userNotFoundResponse();
         }
 
         try {
-            CommunityMembersResponse response = communityService.listMembers(user, communityId);
-            return Response.ok(response).build();
+            return Response.ok(communityService.listMembers(user, communityId, page, size)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
@@ -247,6 +268,8 @@ public class CommunityResource {
             return Response.status(Response.Status.CREATED)
                     .entity(communityService.createPost(user, communityId, body, readOptionalUploadedBytes(image)))
                     .build();
+        } catch (PayloadTooLargeException exception) {
+            return payloadTooLargeResponse(exception.getMessage());
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
@@ -346,14 +369,18 @@ public class CommunityResource {
     @GET
     @Path("/posts/{postId}/comments")
     @Transactional
-    public Response getComments(@PathParam("postId") UUID postId) {
+    public Response getComments(
+            @PathParam("postId") UUID postId,
+            @QueryParam("page") Integer page,
+            @QueryParam("size") Integer size
+    ) {
         User user = findCurrentUser();
         if (user == null) {
             return userNotFoundResponse();
         }
 
         try {
-            return Response.ok(communityService.getComments(user, postId)).build();
+            return Response.ok(communityService.getComments(user, postId, page, size)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
@@ -418,7 +445,7 @@ public class CommunityResource {
         }
 
         try {
-            return Response.ok(communityService.getCommunityIcon(communityId)).type("image/jpeg").build();
+            return ImageResponses.jpeg(communityService.getCommunityIcon(communityId), request);
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }
@@ -435,7 +462,7 @@ public class CommunityResource {
         }
 
         try {
-            return Response.ok(communityService.getPostMedia(postId)).type("image/jpeg").build();
+            return ImageResponses.jpeg(communityService.getPostMedia(postId), request);
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }
@@ -452,7 +479,7 @@ public class CommunityResource {
         }
 
         try {
-            return Response.ok(communityService.getAuthorAvatar(userId)).type("image/jpeg").build();
+            return ImageResponses.jpeg(communityService.getAuthorAvatar(userId), request);
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }
@@ -465,6 +492,13 @@ public class CommunityResource {
     protected byte[] readOptionalUploadedBytes(FileUpload image) {
         if (image == null || image.uploadedFile() == null) {
             return null;
+        }
+
+        if (image.size() > maxImageBytes) {
+            throw new PayloadTooLargeException(
+                    "A imagem enviada tem " + image.size()
+                            + " bytes e o limite e de " + maxImageBytes + " bytes"
+            );
         }
 
         try {
@@ -490,6 +524,12 @@ public class CommunityResource {
     private Response conflictResponse(String details) {
         return Response.status(Response.Status.CONFLICT)
                 .entity(ErrorResponse.of(ErrorCode.RESOURCE_CONFLICT, details))
+                .build();
+    }
+
+    private Response payloadTooLargeResponse(String details) {
+        return Response.status(ErrorCode.VALIDATION_FILE_TOO_LARGE.getHttpStatus())
+                .entity(ErrorResponse.of(ErrorCode.VALIDATION_FILE_TOO_LARGE, details))
                 .build();
     }
 

@@ -10,6 +10,7 @@ import org.hibernate.type.SqlTypes;
 
 import br.com.unify.matchable.user.entity.User;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
+import io.quarkus.hibernate.orm.panache.PanacheQuery;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -48,7 +49,12 @@ public class CommunityPost extends PanacheEntityBase {
     public Blob mediaOid;
 
     public static List<CommunityPost> listByCommunity(Community community) {
-        return list("community = ?1 order by createdAt desc, id desc", community);
+        return queryByCommunity(community).list();
+    }
+
+    /** Ordenacao estavel para paginacao: mais recentes primeiro (indice created_at). */
+    public static PanacheQuery<CommunityPost> queryByCommunity(Community community) {
+        return find("community = ?1 order by createdAt desc, id desc", community);
     }
 
     public static CommunityPost findByIdWithActiveCommunity(UUID id) {
