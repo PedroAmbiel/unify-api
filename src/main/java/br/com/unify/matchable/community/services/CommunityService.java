@@ -1,8 +1,10 @@
 package br.com.unify.matchable.community.services;
 
+import java.util.List;
 import java.util.UUID;
 
 import br.com.unify.matchable.common.dto.PageResponse;
+import br.com.unify.matchable.community.dto.CommunityCategoryResponse;
 import br.com.unify.matchable.community.dto.CommunityCommentResponse;
 import br.com.unify.matchable.community.dto.CommunityFeedResponse;
 import br.com.unify.matchable.community.dto.CommunityLikeResponse;
@@ -17,11 +19,24 @@ import br.com.unify.matchable.user.entity.User;
 
 public interface CommunityService {
 
-    CommunityPageResponse listCommunities(User user, Integer page, Integer size);
+    List<CommunityCategoryResponse> listCategories();
 
-    CommunityPageResponse searchCommunities(User user, String query, Integer page, Integer size);
+    CommunityPageResponse listCommunities(User user, Integer categoryId, Integer page, Integer size);
 
-    CommunitySummaryResponse createCommunity(User user, String name, String description, byte[] iconBytes);
+    CommunityPageResponse searchCommunities(User user, String query, Integer categoryId, Integer page, Integer size);
+
+    CommunityPageResponse listMyCommunities(User user, Integer page, Integer size);
+
+    CommunitySummaryResponse createCommunity(User user, String name, String description, Integer categoryId, byte[] iconBytes);
+
+    CommunitySummaryResponse updateCommunity(
+            User user,
+            UUID communityId,
+            String name,
+            String description,
+            Integer categoryId,
+            byte[] iconBytes
+    );
 
     void deleteCommunity(User user, UUID communityId);
 

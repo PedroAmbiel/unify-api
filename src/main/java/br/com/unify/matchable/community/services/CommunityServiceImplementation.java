@@ -2,15 +2,18 @@ package br.com.unify.matchable.community.services;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
+import java.util.function.ToLongFunction;
 
 import br.com.unify.matchable.common.UUIDv7Generator;
 import br.com.unify.matchable.common.dto.PageParams;
 import br.com.unify.matchable.common.dto.PageResponse;
 import br.com.unify.matchable.common.image.OidImageService;
 import br.com.unify.matchable.community.dto.CommunityAuthorResponse;
+import br.com.unify.matchable.community.dto.CommunityCategoryResponse;
 import br.com.unify.matchable.community.dto.CommunityCommentResponse;
 import br.com.unify.matchable.community.dto.CommunityFeedResponse;
 import br.com.unify.matchable.community.dto.CommunityLikeResponse;
@@ -21,6 +24,7 @@ import br.com.unify.matchable.community.dto.CommunityPageResponse;
 import br.com.unify.matchable.community.dto.CommunityPostResponse;
 import br.com.unify.matchable.community.dto.CommunitySummaryResponse;
 import br.com.unify.matchable.community.entity.Community;
+import br.com.unify.matchable.community.entity.CommunityCategory;
 import br.com.unify.matchable.community.entity.CommunityMembership;
 import br.com.unify.matchable.community.entity.CommunityPost;
 import br.com.unify.matchable.community.entity.CommunityPostComment;
@@ -45,6 +49,8 @@ public class CommunityServiceImplementation implements CommunityService {
     private static final String COMMUNITY_MEMBER_NOT_FOUND_MESSAGE = "Membro da comunidade não encontrado";
     private static final String COMMUNITY_OWNER_LEAVE_MESSAGE = "O proprietário da comunidade não pode sair da própria comunidade";
     private static final String COMMUNITY_DELETE_FORBIDDEN_MESSAGE = "Apenas o proprietário da comunidade pode excluir a comunidade";
+    private static final String COMMUNITY_UPDATE_FORBIDDEN_MESSAGE = "Apenas administradores da comunidade podem editar os dados dela";
+    private static final String COMMUNITY_CATEGORY_INVALID_MESSAGE = "Categoria de comunidade inválida";
     private static final String COMMUNITY_ROLE_UPDATE_REQUIRED_MESSAGE = "Informe o novo nível de permissão do membro";
     private static final String COMMUNITY_ROLE_UPDATE_FORBIDDEN_MESSAGE = "Você não tem permissão para alterar o nível deste membro";
     private static final String COMMUNITY_SELF_ROLE_UPDATE_FORBIDDEN_MESSAGE = "Você não pode alterar o próprio nível de permissão";
@@ -71,35 +77,112 @@ public class CommunityServiceImplementation implements CommunityService {
     OidImageService oidImageService;
 
     @Override
-    public CommunityPageResponse listCommunities(User user, Integer page, Integer size) {
+    public List<CommunityCategoryResponse> listCategories() {
+        return CommunityCategory.listAllOrderedByDescription().stream()
+                .map(this::toCategoryResponse)
+                .toList();
+    }
+
+    /*
+     * Nota de performance/trade-off: a ordenacao por relevancia (nome > descricao) e por memberCount
+     * e feita em memoria depois de buscar todas as comunidades que casam com o filtro, e a paginacao
+     * e um subList sobre a lista ja ordenada. Aceitavel na escala atual (dezenas/centenas de
+     * comunidades); se o volume crescer, revisitar com SQL nativo calculando relevancia e memberCount
+     * em uma unica query com ORDER BY (como em UserMatchServiceImplementation).
+     */
+    @Override
+    public CommunityPageResponse listCommunities(User user, Integer categoryId, Integer page, Integer size) {
         int resolvedPage = validatePage(page);
         int resolvedSize = validateSize(size);
 
-        PanacheQuery<Community> query = Community.find("active = true order by id desc");
-        long totalElements = query.count();
-        List<Community> communities = query.page(Page.of(resolvedPage, resolvedSize)).list();
-        return toCommunityPageResponse(communities, user, resolvedPage, resolvedSize, totalElements);
+        List<Community> matches = categoryId != null
+                ? Community.<Community>find("active = true and category.id = ?1", categoryId).list()
+                : Community.<Community>find("active = true").list();
+
+        List<Community> ordered = sortByPopularity(matches, CommunityMembership::countByCommunity);
+
+        long totalElements = ordered.size();
+        List<Community> pageItems = paginate(ordered, resolvedPage, resolvedSize);
+        return toCommunityPageResponse(pageItems, user, resolvedPage, resolvedSize, totalElements);
     }
 
     @Override
-    public CommunityPageResponse searchCommunities(User user, String queryText, Integer page, Integer size) {
+    public CommunityPageResponse searchCommunities(User user, String queryText, Integer categoryId, Integer page, Integer size) {
         int resolvedPage = validatePage(page);
         int resolvedSize = validateSize(size);
         String normalizedQuery = requireText(queryText, COMMUNITY_SEARCH_REQUIRED_MESSAGE).toLowerCase();
         String wildcardQuery = "%" + normalizedQuery + "%";
 
-        PanacheQuery<Community> query = Community.find(
-                "active = true and (lower(name) like ?1 or lower(coalesce(description, '')) like ?1) order by id desc",
-                wildcardQuery
+        String jpql = "active = true and (lower(name) like ?1 or lower(coalesce(description, '')) like ?1)"
+                + (categoryId != null ? " and category.id = ?2" : "");
+
+        List<Community> matches = categoryId != null
+                ? Community.<Community>find(jpql, wildcardQuery, categoryId).list()
+                : Community.<Community>find(jpql, wildcardQuery).list();
+
+        List<Community> ordered = sortByRelevance(matches, normalizedQuery, CommunityMembership::countByCommunity);
+
+        long totalElements = ordered.size();
+        List<Community> pageItems = paginate(ordered, resolvedPage, resolvedSize);
+        return toCommunityPageResponse(pageItems, user, resolvedPage, resolvedSize, totalElements);
+    }
+
+    @Override
+    public CommunityPageResponse listMyCommunities(User user, Integer page, Integer size) {
+        int resolvedPage = validatePage(page);
+        int resolvedSize = validateSize(size);
+
+        List<CommunityMembership> memberships = CommunityMembership.list(
+                "userProfile.user = ?1 and community.active = true order by joinedAt desc",
+                user
         );
-        long totalElements = query.count();
-        List<Community> communities = query.page(Page.of(resolvedPage, resolvedSize)).list();
-        return toCommunityPageResponse(communities, user, resolvedPage, resolvedSize, totalElements);
+
+        List<Community> communities = memberships.stream().map(membership -> membership.community).toList();
+        long totalElements = communities.size();
+        List<Community> pageItems = paginate(communities, resolvedPage, resolvedSize);
+
+        return toCommunityPageResponse(pageItems, user, resolvedPage, resolvedSize, totalElements);
+    }
+
+    /** Ordena por popularidade (memberCount desc) e desempata pelo nome. */
+    List<Community> sortByPopularity(List<Community> communities, ToLongFunction<Community> memberCounter) {
+        Comparator<Community> ordering = Comparator.<Community>comparingLong(memberCounter::applyAsLong)
+                .reversed()
+                .thenComparing(community -> community.name, String.CASE_INSENSITIVE_ORDER);
+        return communities.stream().sorted(ordering).toList();
+    }
+
+    /** Match no nome vem antes de match apenas na descricao; empates caem para popularidade. */
+    List<Community> sortByRelevance(
+            List<Community> communities,
+            String normalizedQuery,
+            ToLongFunction<Community> memberCounter
+    ) {
+        Comparator<Community> ordering = Comparator
+                .comparing((Community community) -> !containsIgnoreCase(community.name, normalizedQuery))
+                .thenComparing(Comparator.<Community>comparingLong(memberCounter::applyAsLong).reversed());
+        return communities.stream().sorted(ordering).toList();
+    }
+
+    private boolean containsIgnoreCase(String value, String query) {
+        return value != null && query != null && value.toLowerCase().contains(query.toLowerCase());
+    }
+
+    private <T> List<T> paginate(List<T> items, int page, int size) {
+        int fromIndex = Math.min(page * size, items.size());
+        int toIndex = Math.min(fromIndex + size, items.size());
+        return items.subList(fromIndex, toIndex);
     }
 
     @Override
     @Transactional
-    public CommunitySummaryResponse createCommunity(User user, String name, String description, byte[] iconBytes) {
+    public CommunitySummaryResponse createCommunity(
+            User user,
+            String name,
+            String description,
+            Integer categoryId,
+            byte[] iconBytes
+    ) {
         UserProfile ownerProfile = requireUserProfile(user);
 
         Community community = new Community();
@@ -107,6 +190,7 @@ public class CommunityServiceImplementation implements CommunityService {
         community.name = requireText(name, COMMUNITY_NAME_REQUIRED_MESSAGE);
         community.description = normalizeText(description);
         community.owner = user;
+        community.category = resolveCategory(categoryId);
         community.active = true;
         community.featured = false;
         if (iconBytes != null && iconBytes.length > 0) {
@@ -121,6 +205,32 @@ public class CommunityServiceImplementation implements CommunityService {
         membership.role = CommunityMemberRole.ADMIN;
         membership.joinedAt = Instant.now();
         membership.persist();
+
+        return toCommunitySummaryResponse(community, user);
+    }
+
+    // TODO(futuro): campo `visibility` (PUBLIC/PRIVATE/INVITE_ONLY) em Community,
+    // afetando listCommunities/searchCommunities e a permissão de joinCommunity.
+    // Fora de escopo desta semana — ver plano 01-SEMANA-12-08-a-26-08.md, seção 4.C.
+    @Override
+    @Transactional
+    public CommunitySummaryResponse updateCommunity(
+            User user,
+            UUID communityId,
+            String name,
+            String description,
+            Integer categoryId,
+            byte[] iconBytes
+    ) {
+        Community community = requireCommunity(communityId);
+        ensureAdmin(user, community);
+
+        community.name = requireText(name, COMMUNITY_NAME_REQUIRED_MESSAGE);
+        community.description = normalizeText(description);
+        community.category = resolveCategory(categoryId);
+        if (iconBytes != null && iconBytes.length > 0) {
+            community.iconOid = oidImageService.toOidBlob(oidImageService.compressToJpeg(iconBytes));
+        }
 
         return toCommunitySummaryResponse(community, user);
     }
@@ -486,6 +596,40 @@ public class CommunityServiceImplementation implements CommunityService {
         }
     }
 
+    private void ensureAdmin(User user, Community community) {
+        ensureAdminMembership(CommunityMembership.findByCommunityAndUser(community, user));
+    }
+
+    /**
+     * Regra estritamente ADMIN (diferente de {@code isElevated}, que tambem aceita MODERATOR).
+     * O dono da comunidade sempre vira ADMIN em {@code createCommunity}, entao ja esta coberto.
+     */
+    void ensureAdminMembership(CommunityMembership membership) {
+        boolean isAdmin = membership != null && membership.role == CommunityMemberRole.ADMIN;
+        if (!isAdmin) {
+            throw new SecurityException(COMMUNITY_UPDATE_FORBIDDEN_MESSAGE);
+        }
+    }
+
+    CommunityCategory resolveCategory(Integer categoryId) {
+        if (categoryId == null) {
+            return null;
+        }
+
+        CommunityCategory category = CommunityCategory.findById(categoryId);
+        if (category == null) {
+            throw new IllegalArgumentException(COMMUNITY_CATEGORY_INVALID_MESSAGE);
+        }
+        return category;
+    }
+
+    private CommunityCategoryResponse toCategoryResponse(CommunityCategory category) {
+        if (category == null) {
+            return null;
+        }
+        return new CommunityCategoryResponse(category.id, category.description, category.ionicIcon);
+    }
+
     private void ensureCanUpdateRole(
             User actor,
             Community community,
@@ -541,7 +685,8 @@ public class CommunityServiceImplementation implements CommunityService {
                 membership != null,
                 toAuthorResponse(community.owner),
                 membership == null ? null : membership.role,
-                isOwner(community, user)
+                isOwner(community, user),
+                toCategoryResponse(community.category)
         );
     }
 
@@ -565,7 +710,7 @@ public class CommunityServiceImplementation implements CommunityService {
         );
     }
 
-        private CommunityMemberHeaderResponse toMemberHeaderResponse(CommunityMembership membership) {
+    CommunityMemberHeaderResponse toMemberHeaderResponse(CommunityMembership membership) {
         UserProfile profile = membership == null ? null : membership.userProfile;
         User member = profile == null ? null : profile.user;
         return new CommunityMemberHeaderResponse(
@@ -574,7 +719,8 @@ public class CommunityServiceImplementation implements CommunityService {
             hasAvatar(profile) && member != null && member.id != null
                 ? AUTHOR_AVATAR_URL_PREFIX + member.id + AUTHOR_AVATAR_URL_SUFFIX
                 : null,
-            membership == null ? null : membership.role
+            membership == null ? null : membership.role,
+            membership == null ? null : membership.joinedAt
         );
     }
 

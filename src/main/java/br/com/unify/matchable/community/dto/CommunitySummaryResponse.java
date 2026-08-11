@@ -13,6 +13,7 @@ public record CommunitySummaryResponse(
         Boolean isMember,
         CommunityAuthorResponse owner,
         CommunityMemberRole currentUserRole,
-        Boolean isOwner
+        Boolean isOwner,
+        CommunityCategoryResponse category
 ) {
 }

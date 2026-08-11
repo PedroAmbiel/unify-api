@@ -6,6 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -16,6 +20,7 @@ import org.jboss.resteasy.reactive.multipart.FileUpload;
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.dto.PageResponse;
 import br.com.unify.matchable.community.dto.CommunityAuthorResponse;
+import br.com.unify.matchable.community.dto.CommunityCategoryResponse;
 import br.com.unify.matchable.community.dto.CommunityCommentCreateRequest;
 import br.com.unify.matchable.community.dto.CommunityCommentResponse;
 import br.com.unify.matchable.community.dto.CommunityFeedResponse;
@@ -44,13 +49,81 @@ class CommunityResourceTest {
         resource.communityService = service;
         resource.currentUser = buildUser();
 
-        Response response = resource.listCommunities(0, 20);
+        Response response = resource.listCommunities(0, 20, null);
 
         assertEquals(200, response.getStatus());
         assertEquals(0, service.capturedPage);
         assertEquals(20, service.capturedSize);
+        assertNull(service.capturedCategoryId);
         CommunityPageResponse body = assertInstanceOf(CommunityPageResponse.class, response.getEntity());
         assertEquals(List.of("Comunidade Unify"), body.communities().stream().map(CommunitySummaryResponse::name).toList());
+    }
+
+    @Test
+    void listCategoriesReturnsSeededCatalog() {
+        StubCommunityService service = new StubCommunityService();
+        service.categoriesResponse = buildSeededCategories();
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.listCategories();
+
+        assertEquals(200, response.getStatus());
+        @SuppressWarnings("unchecked")
+        List<CommunityCategoryResponse> body = assertInstanceOf(List.class, response.getEntity());
+        assertEquals(10, body.size());
+        assertEquals("Apoio e Bem-estar", body.getFirst().description());
+        assertEquals("heart-outline", body.getFirst().ionicIcon());
+    }
+
+    @Test
+    void listCommunitiesForwardsCategoryFilterToService() {
+        StubCommunityService service = new StubCommunityService();
+        UUID communityId = UUID.randomUUID();
+        service.pageResponse = new CommunityPageResponse(
+                List.of(buildCommunitySummary(communityId, new CommunityCategoryResponse(3, "Tecnologia Assistiva", "hardware-chip-outline"))),
+                0,
+                20,
+                1L,
+                1,
+                false
+        );
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.listCommunities(0, 20, 3);
+
+        assertEquals(200, response.getStatus());
+        assertEquals(3, service.capturedCategoryId);
+        CommunityPageResponse body = assertInstanceOf(CommunityPageResponse.class, response.getEntity());
+        assertEquals(
+                List.of(3),
+                body.communities().stream().map(community -> community.category().id()).toList()
+        );
+    }
+
+    @Test
+    void listMyCommunitiesReturnsPaginatedPayload() {
+        StubCommunityService service = new StubCommunityService();
+        UUID communityId = UUID.randomUUID();
+        service.pageResponse = new CommunityPageResponse(List.of(buildCommunitySummary(communityId)), 0, 20, 1L, 1, false);
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.listMyCommunities(0, 20);
+
+        assertEquals(200, response.getStatus());
+        assertTrue(service.listMyCommunitiesCalled);
+        assertEquals(0, service.capturedPage);
+        assertEquals(20, service.capturedSize);
+        CommunityPageResponse body = assertInstanceOf(CommunityPageResponse.class, response.getEntity());
+        assertEquals(1L, body.totalElements());
     }
 
     @Test
@@ -63,12 +136,13 @@ class CommunityResourceTest {
         resource.communityService = service;
         resource.currentUser = buildUser();
 
-        Response response = resource.searchCommunities("unify", 1, 10);
+        Response response = resource.searchCommunities("unify", 1, 10, 7);
 
         assertEquals(200, response.getStatus());
         assertEquals("unify", service.capturedQuery);
         assertEquals(1, service.capturedPage);
         assertEquals(10, service.capturedSize);
+        assertEquals(7, service.capturedCategoryId);
         CommunityPageResponse body = assertInstanceOf(CommunityPageResponse.class, response.getEntity());
         assertEquals(11L, body.totalElements());
     }
@@ -84,15 +158,92 @@ class CommunityResourceTest {
         resource.currentUser = buildUser();
         resource.nextUploadedBytes = new byte[] { 1, 2, 3 };
 
-        Response response = resource.createCommunity("Comunidade Unify", "Descrição", null);
+        Response response = resource.createCommunity("Comunidade Unify", "Descrição", 3, null);
 
         assertEquals(201, response.getStatus());
         assertEquals("Comunidade Unify", service.capturedName);
         assertEquals("Descrição", service.capturedDescription);
+        assertEquals(3, service.capturedCategoryId);
         assertArrayEquals(new byte[] { 1, 2, 3 }, service.capturedImageBytes);
         CommunitySummaryResponse body = assertInstanceOf(CommunitySummaryResponse.class, response.getEntity());
         assertEquals(communityId, body.id());
         assertTrue(body.isOwner());
+    }
+
+    @Test
+    void createCommunityReturnsBadRequestWhenCategoryDoesNotExist() {
+        StubCommunityService service = new StubCommunityService();
+        service.validationException = new IllegalArgumentException("Categoria de comunidade inválida");
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.createCommunity("Comunidade Unify", "Descrição", 999, null);
+
+        assertEquals(400, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("VALIDATION_INVALID_FORMAT", body.error());
+        assertTrue(body.message().contains("Categoria de comunidade inválida"));
+    }
+
+    @Test
+    void updateCommunityReturnsUpdatedSummary() {
+        StubCommunityService service = new StubCommunityService();
+        UUID communityId = UUID.randomUUID();
+        service.summaryResponse = buildCommunitySummary(
+                communityId,
+                new CommunityCategoryResponse(2, "Arte e Cultura", "color-palette-outline")
+        );
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+        resource.nextUploadedBytes = new byte[] { 4, 5 };
+
+        Response response = resource.updateCommunity(communityId, "Novo nome", "Nova descrição", 2, null);
+
+        assertEquals(200, response.getStatus());
+        assertEquals(communityId, service.capturedCommunityId);
+        assertEquals("Novo nome", service.capturedName);
+        assertEquals("Nova descrição", service.capturedDescription);
+        assertEquals(2, service.capturedCategoryId);
+        assertArrayEquals(new byte[] { 4, 5 }, service.capturedImageBytes);
+        CommunitySummaryResponse body = assertInstanceOf(CommunitySummaryResponse.class, response.getEntity());
+        assertEquals(2, body.category().id());
+    }
+
+    @Test
+    void updateCommunityReturnsForbiddenWhenServiceRejectsNonAdmin() {
+        StubCommunityService service = new StubCommunityService();
+        service.securityException = new SecurityException("Apenas administradores da comunidade podem editar os dados dela");
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.updateCommunity(UUID.randomUUID(), "Novo nome", null, null, null);
+
+        assertEquals(403, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("AUTH_FORBIDDEN", body.error());
+        assertTrue(body.message().contains("Apenas administradores da comunidade podem editar os dados dela"));
+    }
+
+    @Test
+    void updateCommunityReturnsNotFoundWhenCommunityDoesNotExist() {
+        StubCommunityService service = new StubCommunityService();
+        service.notFoundException = new NoSuchElementException("Comunidade não encontrada");
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.updateCommunity(UUID.randomUUID(), "Novo nome", null, null, null);
+
+        assertEquals(404, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("RESOURCE_NOT_FOUND", body.error());
     }
 
     @Test
@@ -247,12 +398,14 @@ class CommunityResourceTest {
         StubCommunityService service = new StubCommunityService();
         UUID communityId = UUID.randomUUID();
         UUID userProfileId = UUID.randomUUID();
+        Instant joinedAt = Instant.parse("2026-08-10T12:00:00Z");
         service.membersResponse = PageResponse.of(
                 List.of(new CommunityMemberHeaderResponse(
                         userProfileId,
                         "Larissa Costa",
                         "/communities/users/123/avatar",
-                        CommunityMemberRole.MEMBER
+                        CommunityMemberRole.MEMBER,
+                        joinedAt
                 )),
                 0,
                 20,
@@ -271,6 +424,8 @@ class CommunityResourceTest {
         PageResponse<CommunityMemberHeaderResponse> body = assertInstanceOf(PageResponse.class, response.getEntity());
         assertEquals(userProfileId, body.content().getFirst().userProfileId());
         assertEquals("Larissa Costa", body.content().getFirst().name());
+        assertNotNull(body.content().getFirst().joinedAt());
+        assertEquals(joinedAt, body.content().getFirst().joinedAt());
         assertEquals(0, body.page());
         assertEquals(20, body.size());
         assertEquals(1L, body.totalElements());
@@ -301,7 +456,7 @@ class CommunityResourceTest {
         resource.communityService = service;
         resource.currentUser = buildUser();
 
-        Response response = resource.listCommunities(0, 1000);
+        Response response = resource.listCommunities(0, 1000, null);
 
         assertEquals(400, response.getStatus());
         assertEquals("VALIDATION_INVALID_FORMAT", assertInstanceOf(ErrorResponse.class, response.getEntity()).error());
@@ -314,7 +469,7 @@ class CommunityResourceTest {
         UUID targetUserProfileId = UUID.randomUUID();
         service.memberResponse = new CommunityMemberResponse(
                 communityId,
-            new CommunityMemberHeaderResponse(targetUserProfileId, "Larissa", null, CommunityMemberRole.MODERATOR),
+            new CommunityMemberHeaderResponse(targetUserProfileId, "Larissa", null, CommunityMemberRole.MODERATOR, Instant.now()),
                 CommunityMemberRole.MODERATOR,
                 false
         );
@@ -469,6 +624,10 @@ class CommunityResourceTest {
     }
 
     private CommunitySummaryResponse buildCommunitySummary(UUID communityId) {
+        return buildCommunitySummary(communityId, null);
+    }
+
+    private CommunitySummaryResponse buildCommunitySummary(UUID communityId, CommunityCategoryResponse category) {
         UUID ownerId = UUID.randomUUID();
         return new CommunitySummaryResponse(
                 communityId,
@@ -479,7 +638,24 @@ class CommunityResourceTest {
                 true,
                 new CommunityAuthorResponse(ownerId, "Owner Unify", null),
                 CommunityMemberRole.ADMIN,
-                true
+                true,
+                category
+        );
+    }
+
+    /** Espelha o catalogo semeado em V4__create_community_categories.sql, ja ordenado por descricao. */
+    private List<CommunityCategoryResponse> buildSeededCategories() {
+        return List.of(
+                new CommunityCategoryResponse(4, "Apoio e Bem-estar", "heart-outline"),
+                new CommunityCategoryResponse(2, "Arte e Cultura", "color-palette-outline"),
+                new CommunityCategoryResponse(5, "Educação e Estudos", "school-outline"),
+                new CommunityCategoryResponse(1, "Esportes Adaptados", "basketball-outline"),
+                new CommunityCategoryResponse(7, "Jogos e Games Acessíveis", "game-controller-outline"),
+                new CommunityCategoryResponse(8, "Música e Podcasts", "musical-notes-outline"),
+                new CommunityCategoryResponse(10, "Relacionamentos e Amizade", "people-outline"),
+                new CommunityCategoryResponse(3, "Tecnologia Assistiva", "hardware-chip-outline"),
+                new CommunityCategoryResponse(6, "Trabalho e Empreendedorismo", "briefcase-outline"),
+                new CommunityCategoryResponse(9, "Viagem e Mobilidade Urbana", "airplane-outline")
         );
     }
 
@@ -514,6 +690,9 @@ class CommunityResourceTest {
         private UUID capturedTargetUserProfileId;
         private UUID capturedPostId;
         private UUID capturedCommentId;
+        private Integer capturedCategoryId;
+        private boolean listMyCommunitiesCalled;
+        private List<CommunityCategoryResponse> categoriesResponse = List.of();
         private String capturedName;
         private String capturedDescription;
         private String capturedBody;
@@ -538,8 +717,14 @@ class CommunityResourceTest {
         private SecurityException securityException;
 
         @Override
-        public CommunityPageResponse listCommunities(User user, Integer page, Integer size) {
+        public List<CommunityCategoryResponse> listCategories() {
+            return categoriesResponse;
+        }
+
+        @Override
+        public CommunityPageResponse listCommunities(User user, Integer categoryId, Integer page, Integer size) {
             capturedUser = user;
+            capturedCategoryId = categoryId;
             capturedPage = page;
             capturedSize = size;
             if (validationException != null) {
@@ -549,9 +734,10 @@ class CommunityResourceTest {
         }
 
         @Override
-        public CommunityPageResponse searchCommunities(User user, String query, Integer page, Integer size) {
+        public CommunityPageResponse searchCommunities(User user, String query, Integer categoryId, Integer page, Integer size) {
             capturedUser = user;
             capturedQuery = query;
+            capturedCategoryId = categoryId;
             capturedPage = page;
             capturedSize = size;
             if (validationException != null) {
@@ -561,16 +747,56 @@ class CommunityResourceTest {
         }
 
         @Override
-        public CommunitySummaryResponse createCommunity(User user, String name, String description, byte[] iconBytes) {
+        public CommunityPageResponse listMyCommunities(User user, Integer page, Integer size) {
+            capturedUser = user;
+            capturedPage = page;
+            capturedSize = size;
+            listMyCommunitiesCalled = true;
+            if (validationException != null) {
+                throw validationException;
+            }
+            return pageResponse;
+        }
+
+        @Override
+        public CommunitySummaryResponse createCommunity(User user, String name, String description, Integer categoryId, byte[] iconBytes) {
             capturedUser = user;
             capturedName = name;
             capturedDescription = description;
+            capturedCategoryId = categoryId;
             capturedImageBytes = iconBytes;
             if (validationException != null) {
                 throw validationException;
             }
             if (stateException != null) {
                 throw stateException;
+            }
+            return summaryResponse;
+        }
+
+        @Override
+        public CommunitySummaryResponse updateCommunity(
+                User user,
+                UUID communityId,
+                String name,
+                String description,
+                Integer categoryId,
+                byte[] iconBytes
+        ) {
+            capturedUser = user;
+            capturedCommunityId = communityId;
+            capturedName = name;
+            capturedDescription = description;
+            capturedCategoryId = categoryId;
+            capturedImageBytes = iconBytes;
+            if (validationException != null) {
+                throw validationException;
+            }
+            if (securityException != null) {
+                throw securityException;
+            }
+            if (notFoundException != null) {
+                throw notFoundException;
             }
             return summaryResponse;
         }

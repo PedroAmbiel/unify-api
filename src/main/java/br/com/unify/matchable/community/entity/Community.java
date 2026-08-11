@@ -36,6 +36,10 @@ public class Community extends PanacheEntityBase {
     @JoinColumn(name = "fk_owner_user", nullable = false, foreignKey = @ForeignKey(name = "fk_communities_owner_user"))
     public User owner;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "fk_category", foreignKey = @ForeignKey(name = "fk_communities_category"))
+    public CommunityCategory category;
+
     @Lob
     @JdbcTypeCode(SqlTypes.BLOB)
     @Column(name = "icon_oid", columnDefinition = "oid")

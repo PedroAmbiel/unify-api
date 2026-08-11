@@ -104,3 +104,15 @@ values (1, 'Amizade'),
        (2, 'Relacionamento'),
        (3, 'Networking'),
        (4, 'Comunidade');
+
+insert into community_categories(id, description, ionic_icon)
+values (1, 'Esportes Adaptados', 'basketball-outline'),
+       (2, 'Arte e Cultura', 'color-palette-outline'),
+       (3, 'Tecnologia Assistiva', 'hardware-chip-outline'),
+       (4, 'Apoio e Bem-estar', 'heart-outline'),
+       (5, 'Educação e Estudos', 'school-outline'),
+       (6, 'Trabalho e Empreendedorismo', 'briefcase-outline'),
+       (7, 'Jogos e Games Acessíveis', 'game-controller-outline'),
+       (8, 'Música e Podcasts', 'musical-notes-outline'),
+       (9, 'Viagem e Mobilidade Urbana', 'airplane-outline'),
+       (10, 'Relacionamentos e Amizade', 'people-outline');
