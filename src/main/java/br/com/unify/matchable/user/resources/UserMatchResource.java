@@ -7,6 +7,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
 
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
+import br.com.unify.matchable.common.image.ImageResponses;
 import br.com.unify.matchable.user.dto.MatchDecisionRequest;
 import br.com.unify.matchable.user.dto.PotentialMatchesRequest;
 import br.com.unify.matchable.user.entity.User;
@@ -21,7 +22,9 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Request;
 import jakarta.ws.rs.core.Response;
 
 @Path("/users/me/matches")
@@ -35,6 +38,9 @@ public class UserMatchResource {
 
     @Inject
     UserMatchService userMatchService;
+
+    @Context
+    Request request;
 
     @POST
     @Path("/discovery")
@@ -104,7 +110,7 @@ public class UserMatchResource {
         }
 
         try {
-            return Response.ok(userMatchService.getMatchedProfileImage(user, imageId)).type("image/jpeg").build();
+            return ImageResponses.jpeg(userMatchService.getMatchedProfileImage(user, imageId), request);
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }

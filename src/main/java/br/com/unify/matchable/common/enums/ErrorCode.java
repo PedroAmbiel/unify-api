@@ -80,6 +80,18 @@ public enum ErrorCode {
             "Usuario deve ter 18 anos ou mais"
     ),
 
+    VALIDATION_FILE_TOO_LARGE(
+            3009,
+            413,
+            "Arquivo enviado excede o tamanho maximo permitido"
+    ),
+
+    VALIDATION_INVALID_ARGUMENT(
+            3010,
+            400,
+            "Requisicao invalida"
+    ),
+
     USER_NOT_FOUND(
             4001,
             404,
@@ -150,6 +162,12 @@ public enum ErrorCode {
             9003,
             503,
             "Serviço temporariamente indisponível"
+    ),
+
+    TOO_MANY_REQUESTS(
+            9004,
+            429,
+            "Muitas requisicoes. Aguarde antes de tentar novamente"
     );
 
 

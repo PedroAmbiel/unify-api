@@ -107,7 +107,21 @@ select
     cellphone,
     last_name,
     first_name,
-    '$2a$10$YaiH0J4eVMU6kjtG5pm.oeOxPRPCk1ZX.XjKrXZOqEdhQv1bbo8KG'
+    -- Hashes bcrypt DISTINTOS rotacionados por seed_index: uma senha vazada
+    -- nao abre todas as contas de demo. Senhas: SeedDemo01! .. SeedDemo10!,
+    -- conforme ((seed_index - 1) % 10) + 1. Documentado em import-dev.sql.
+    (array[
+        '$2a$10$4FnGlJ3BIOViptDsSL0.2eIAWhVBFpxdw2TrtDPux6Zn9mmGm8dh.',
+        '$2a$10$2B1GQh1Y6Vm3eSrMM/EF7.oxsTa.b6kPVaEoshS9nEWTbZCkVtemC',
+        '$2a$10$B5btltWQfk/sRutZbNxyPuP8tG3tBXJ7bN6.SDMJe176vqjdoiqcy',
+        '$2a$10$zB8RAve5bvn.PteNyWnyruIH5ZomsZ8TlsY5tYIXvohiuIXvBA5Dy',
+        '$2a$10$ykxRcxkR.QlCGiPuAE9s7.zpj/VCeHVy6bqyGjqPMlqZczdOLZ4PO',
+        '$2a$10$P5/la.nW/a6ysXQEyB.m0uNljRdhd9/MqEUmDNaj52mWtNxtrdrkm',
+        '$2a$10$zhbAiCKYma/AYDdqYf79e.k98Zsdc8YF6DbOkLTEPJNKDOnIXfbsu',
+        '$2a$10$c87tKGDlQCnd1voBL3QQ1uPe/lQMh68FVdUuokbFTK5disVj7SW/O',
+        '$2a$10$hniJlCg7rYI0WvpU2z3IGeuxI/vjYpIPNIoOJgBvYv/5ng53Oe2E6',
+        '$2a$10$GveuYFAraO86f9sjFa.7yeRPZfdTUEPCUnMV1r3DGfLMO99/N6xj2'
+    ]::text[])[((seed_index - 1) % 10) + 1]
 from seed_generated_users;
 
 insert into user_profiles (

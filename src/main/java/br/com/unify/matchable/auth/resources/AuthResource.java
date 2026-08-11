@@ -15,6 +15,7 @@ import br.com.unify.matchable.auth.services.TokenService;
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.dto.MessageResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
+import br.com.unify.matchable.common.filters.RateLimited;
 import br.com.unify.matchable.common.validation.EmailValidator;
 import br.com.unify.matchable.common.validation.PasswordValidator;
 import br.com.unify.matchable.user.entity.User;
@@ -44,6 +45,8 @@ public class AuthResource {
 
     private static final String PASSWORD_RESET_REQUEST_MESSAGE = "Caso o email esteja cadastrado, será enviado um email com um link de redefinição de senha";
 
+    private static final String EMAIL_VERIFICATION_RESEND_MESSAGE = "Caso o email esteja cadastrado e ainda não verificado, será enviado um novo código de verificação";
+
     @Inject
     ServicesUser servicesUser;
 
@@ -62,6 +65,7 @@ public class AuthResource {
     @POST
     @Path("/signup")
     @PermitAll
+    @RateLimited
     @Transactional
     public Response signUp(SignUpRequest request) {
         if (request.email() == null || request.email().isBlank()) {
@@ -95,6 +99,7 @@ public class AuthResource {
     @POST
     @Path("/signin")
     @PermitAll
+    @RateLimited
     @Transactional
     public Response signIn(SignInRequest request,
                            @HeaderParam("User-Agent") String userAgent,
@@ -114,6 +119,7 @@ public class AuthResource {
     @POST
     @Path("/verify-email")
     @PermitAll
+    @RateLimited
     @Transactional
     public Response verifyEmail(EmailVerificationRequest request) {
         if (request.email() == null || request.email().isBlank()) {
@@ -123,14 +129,10 @@ public class AuthResource {
             return errorResponse(ErrorCode.VALIDATION_VERIFICATION_CODE_REQUIRED);
         }
 
+        // Anti-enumeracao: e-mail inexistente, conta ja verificada e codigo errado
+        // produzem exatamente a mesma resposta. Nao ha como distinguir os casos.
         User user = servicesUser.findByEmail(request.email());
-        if (user == null) {
-            return errorResponse(ErrorCode.USER_NOT_FOUND);
-        }
-        if (user.verified) {
-            return errorResponse(ErrorCode.USER_EMAIL_ALREADY_VERIFIED);
-        }
-        if (!emailVerificationService.verifyCode(user, request.code())) {
+        if (user == null || user.verified || !emailVerificationService.verifyCode(user, request.code())) {
             return errorResponse(ErrorCode.USER_EMAIL_VERIFICATION_CODE_INVALID_OR_EXPIRED);
         }
 
@@ -140,27 +142,27 @@ public class AuthResource {
     @POST
     @Path("/resend-email-verification")
     @PermitAll
+    @RateLimited
     @Transactional
     public Response resendEmailVerification(ResendEmailVerificationRequest request) {
         if (request.email() == null || request.email().isBlank()) {
             return errorResponse(ErrorCode.VALIDATION_LOGIN_REQUIRED);
         }
 
+        // Anti-enumeracao: responde sempre 202 com a mesma mensagem generica.
+        // O codigo so e emitido quando o usuario existe e ainda nao verificou.
         User user = servicesUser.findByEmail(request.email());
-        if (user == null) {
-            return errorResponse(ErrorCode.USER_NOT_FOUND);
-        }
-        if (user.verified) {
-            return errorResponse(ErrorCode.USER_EMAIL_ALREADY_VERIFIED);
+        if (user != null && !user.verified) {
+            emailVerificationService.issueCode(user);
         }
 
-        VerificationCodeDispatchResponse verificationResponse = emailVerificationService.issueCode(user);
-        return Response.accepted(verificationResponse).build();
+        return Response.accepted(new MessageResponse(EMAIL_VERIFICATION_RESEND_MESSAGE)).build();
     }
 
     @POST
     @Path("/forgot-password")
     @PermitAll
+    @RateLimited
     @Transactional
     public Response forgotPassword(ForgotPasswordRequest request) {
         if (request.email() == null || request.email().isBlank()) {
@@ -174,6 +176,7 @@ public class AuthResource {
     @POST
     @Path("/reset-password")
     @PermitAll
+    @RateLimited
     @Transactional
     public Response resetPassword(ResetPasswordRequest request) {
         if (request.token() == null || request.token().isBlank()) {
@@ -195,6 +198,7 @@ public class AuthResource {
     @POST
     @Path("/refresh")
     @PermitAll
+    @RateLimited
     @Transactional
     public Response refresh(RefreshTokenRequest request,
                             @HeaderParam("User-Agent") String userAgent,

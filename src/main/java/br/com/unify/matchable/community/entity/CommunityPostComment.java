@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import br.com.unify.matchable.user.entity.User;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
+import io.quarkus.hibernate.orm.panache.PanacheQuery;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -38,7 +39,12 @@ public class CommunityPostComment extends PanacheEntityBase {
     public Instant createdAt;
 
     public static List<CommunityPostComment> listByPost(CommunityPost post) {
-        return list("post = ?1 order by createdAt asc, id asc", post);
+        return queryByPost(post).list();
+    }
+
+    /** Ordenacao estavel para paginacao: cronologica (indice created_at). */
+    public static PanacheQuery<CommunityPostComment> queryByPost(CommunityPost post) {
+        return find("post = ?1 order by createdAt asc, id asc", post);
     }
 
     public static long countByPost(CommunityPost post) {

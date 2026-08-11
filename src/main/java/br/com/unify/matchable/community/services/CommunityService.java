@@ -2,12 +2,12 @@ package br.com.unify.matchable.community.services;
 
 import java.util.UUID;
 
+import br.com.unify.matchable.common.dto.PageResponse;
 import br.com.unify.matchable.community.dto.CommunityCommentResponse;
-import br.com.unify.matchable.community.dto.CommunityCommentsResponse;
 import br.com.unify.matchable.community.dto.CommunityFeedResponse;
 import br.com.unify.matchable.community.dto.CommunityLikeResponse;
+import br.com.unify.matchable.community.dto.CommunityMemberHeaderResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberResponse;
-import br.com.unify.matchable.community.dto.CommunityMembersResponse;
 import br.com.unify.matchable.community.dto.CommunityMembershipResponse;
 import br.com.unify.matchable.community.dto.CommunityPageResponse;
 import br.com.unify.matchable.community.dto.CommunityPostResponse;
@@ -25,13 +25,13 @@ public interface CommunityService {
 
     void deleteCommunity(User user, UUID communityId);
 
-    CommunityFeedResponse getFeed(User user, UUID communityId);
+    CommunityFeedResponse getFeed(User user, UUID communityId, Integer page, Integer size);
 
     CommunityMembershipResponse joinCommunity(User user, UUID communityId);
 
     CommunityMembershipResponse leaveCommunity(User user, UUID communityId);
 
-    CommunityMembersResponse listMembers(User user, UUID communityId);
+    PageResponse<CommunityMemberHeaderResponse> listMembers(User user, UUID communityId, Integer page, Integer size);
 
     CommunityMemberResponse updateMemberRole(User user, UUID communityId, UUID targetUserProfileId, CommunityMemberRole role);
 
@@ -45,7 +45,7 @@ public interface CommunityService {
 
     CommunityLikeResponse deleteLike(User user, UUID postId, UUID targetUserId);
 
-    CommunityCommentsResponse getComments(User user, UUID postId);
+    PageResponse<CommunityCommentResponse> getComments(User user, UUID postId, Integer page, Integer size);
 
     CommunityCommentResponse createComment(User user, UUID postId, String body);
 

@@ -7,14 +7,14 @@ import java.util.NoSuchElementException;
 import java.util.UUID;
 
 import br.com.unify.matchable.common.UUIDv7Generator;
+import br.com.unify.matchable.common.dto.PageParams;
+import br.com.unify.matchable.common.dto.PageResponse;
 import br.com.unify.matchable.common.image.OidImageService;
 import br.com.unify.matchable.community.dto.CommunityAuthorResponse;
 import br.com.unify.matchable.community.dto.CommunityCommentResponse;
-import br.com.unify.matchable.community.dto.CommunityCommentsResponse;
 import br.com.unify.matchable.community.dto.CommunityFeedResponse;
 import br.com.unify.matchable.community.dto.CommunityLikeResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberHeaderResponse;
-import br.com.unify.matchable.community.dto.CommunityMembersResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberResponse;
 import br.com.unify.matchable.community.dto.CommunityMembershipResponse;
 import br.com.unify.matchable.community.dto.CommunityPageResponse;
@@ -37,10 +37,6 @@ import jakarta.transaction.Transactional;
 
 @ApplicationScoped
 public class CommunityServiceImplementation implements CommunityService {
-
-    private static final int DEFAULT_PAGE = 0;
-    private static final int DEFAULT_PAGE_SIZE = 20;
-    private static final int MAX_PAGE_SIZE = 100;
 
     private static final String COMMUNITY_NOT_FOUND_MESSAGE = "Comunidade não encontrada";
     private static final String COMMUNITY_ICON_NOT_FOUND_MESSAGE = "Ícone da comunidade não encontrado";
@@ -65,8 +61,6 @@ public class CommunityServiceImplementation implements CommunityService {
     private static final String LIKE_DELETE_FORBIDDEN_MESSAGE = "Você não tem permissão para remover esta curtida";
     private static final String AUTHOR_AVATAR_NOT_FOUND_MESSAGE = "Avatar do autor não encontrado";
     private static final String MEMBERSHIP_REQUIRED_MESSAGE = "Você precisa participar da comunidade para interagir";
-    private static final String INVALID_PAGE_MESSAGE = "O parâmetro 'page' deve ser maior ou igual a zero";
-    private static final String INVALID_SIZE_MESSAGE = "O parâmetro 'size' deve estar entre 1 e " + MAX_PAGE_SIZE;
     private static final String COMMUNITY_ICON_URL_SUFFIX = "/icon";
     private static final String POST_MEDIA_URL_PREFIX = "/communities/posts/";
     private static final String POST_MEDIA_URL_SUFFIX = "/media";
@@ -142,17 +136,24 @@ public class CommunityServiceImplementation implements CommunityService {
     }
 
     @Override
-    public CommunityFeedResponse getFeed(User user, UUID communityId) {
+    public CommunityFeedResponse getFeed(User user, UUID communityId, Integer page, Integer size) {
+        int resolvedPage = validatePage(page);
+        int resolvedSize = validateSize(size);
+
         Community community = resolveFeedCommunity(communityId);
         if (community == null) {
-            return new CommunityFeedResponse(null, List.of());
+            return new CommunityFeedResponse(null, PageResponse.empty(resolvedPage, resolvedSize));
         }
+
+        PanacheQuery<CommunityPost> query = CommunityPost.queryByCommunity(community);
+        long totalElements = query.count();
+        List<CommunityPostResponse> posts = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
+                .map(post -> toPostResponse(post, user))
+                .toList();
 
         return new CommunityFeedResponse(
                 toCommunitySummaryResponse(community, user),
-                CommunityPost.listByCommunity(community).stream()
-                        .map(post -> toPostResponse(post, user))
-                        .toList()
+                PageResponse.of(posts, resolvedPage, resolvedSize, totalElements)
         );
     }
 
@@ -190,14 +191,18 @@ public class CommunityServiceImplementation implements CommunityService {
     }
 
     @Override
-    public CommunityMembersResponse listMembers(User user, UUID communityId) {
-        Community community = requireCommunity(communityId);
-        List<CommunityMembership> memberships = CommunityMembership.listByCommunity(community);
+    public PageResponse<CommunityMemberHeaderResponse> listMembers(User user, UUID communityId, Integer page, Integer size) {
+        int resolvedPage = validatePage(page);
+        int resolvedSize = validateSize(size);
 
-        return new CommunityMembersResponse(
-                community.id,
-                memberships.stream().map(this::toMemberHeaderResponse).toList()
-        );
+        Community community = requireCommunity(communityId);
+        PanacheQuery<CommunityMembership> query = CommunityMembership.queryByCommunity(community);
+        long totalElements = query.count();
+        List<CommunityMemberHeaderResponse> members = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
+                .map(this::toMemberHeaderResponse)
+                .toList();
+
+        return PageResponse.of(members, resolvedPage, resolvedSize, totalElements);
     }
 
     @Override
@@ -313,14 +318,18 @@ public class CommunityServiceImplementation implements CommunityService {
     }
 
     @Override
-    public CommunityCommentsResponse getComments(User user, UUID postId) {
+    public PageResponse<CommunityCommentResponse> getComments(User user, UUID postId, Integer page, Integer size) {
+        int resolvedPage = validatePage(page);
+        int resolvedSize = validateSize(size);
+
         CommunityPost post = requirePost(postId);
-        return new CommunityCommentsResponse(
-                post.id,
-                CommunityPostComment.listByPost(post).stream()
-                        .map(comment -> toCommentResponse(comment, user))
-                        .toList()
-        );
+        PanacheQuery<CommunityPostComment> query = CommunityPostComment.queryByPost(post);
+        long totalElements = query.count();
+        List<CommunityCommentResponse> comments = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
+                .map(comment -> toCommentResponse(comment, user))
+                .toList();
+
+        return PageResponse.of(comments, resolvedPage, resolvedSize, totalElements);
     }
 
     @Override
@@ -640,19 +649,11 @@ public class CommunityServiceImplementation implements CommunityService {
     }
 
     private int validatePage(Integer page) {
-        int resolvedPage = page == null ? DEFAULT_PAGE : page;
-        if (resolvedPage < 0) {
-            throw new IllegalArgumentException(INVALID_PAGE_MESSAGE);
-        }
-        return resolvedPage;
+        return PageParams.resolvePage(page);
     }
 
     private int validateSize(Integer size) {
-        int resolvedSize = size == null ? DEFAULT_PAGE_SIZE : size;
-        if (resolvedSize < 1 || resolvedSize > MAX_PAGE_SIZE) {
-            throw new IllegalArgumentException(INVALID_SIZE_MESSAGE);
-        }
-        return resolvedSize;
+        return PageParams.resolveSize(size);
     }
 
     private String requireText(String value, String message) {

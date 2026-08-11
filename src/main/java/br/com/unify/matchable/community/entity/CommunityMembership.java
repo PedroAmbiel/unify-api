@@ -8,6 +8,7 @@ import br.com.unify.matchable.community.enums.CommunityMemberRole;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserProfile;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
+import io.quarkus.hibernate.orm.panache.PanacheQuery;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -63,6 +64,11 @@ public class CommunityMembership extends PanacheEntityBase {
     }
 
     public static List<CommunityMembership> listByCommunity(Community community) {
-        return list("community = ?1 order by joinedAt asc, id asc", community);
+        return queryByCommunity(community).list();
+    }
+
+    /** Ordenacao estavel para paginacao: ordem de entrada na comunidade. */
+    public static PanacheQuery<CommunityMembership> queryByCommunity(Community community) {
+        return find("community = ?1 order by joinedAt asc, id asc", community);
     }
 }
