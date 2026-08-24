@@ -6,7 +6,6 @@ public record UserAccessibilitySettingsResponse(
         FontScaleOption fontScale,
         Double fontScaleMultiplier,
         boolean highContrast,
-        boolean screenReaderOptimized,
         boolean reduceMotion
 ) {
 }

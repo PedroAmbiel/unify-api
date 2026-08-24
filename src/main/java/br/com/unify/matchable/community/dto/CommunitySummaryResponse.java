@@ -3,6 +3,7 @@ package br.com.unify.matchable.community.dto;
 import java.util.UUID;
 
 import br.com.unify.matchable.community.enums.CommunityMemberRole;
+import br.com.unify.matchable.community.enums.CommunityPrivacy;
 
 public record CommunitySummaryResponse(
         UUID id,
@@ -14,6 +15,8 @@ public record CommunitySummaryResponse(
         CommunityAuthorResponse owner,
         CommunityMemberRole currentUserRole,
         Boolean isOwner,
-        CommunityCategoryResponse category
+        CommunityCategoryResponse category,
+        CommunityPrivacy privacy,
+        Boolean hasPendingRequest
 ) {
 }

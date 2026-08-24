@@ -35,9 +35,6 @@ public class UserAccessibilitySettings extends PanacheEntityBase {
     @Column(name = "high_contrast", nullable = false)
     public boolean highContrast = false;
 
-    @Column(name = "screen_reader_optimized", nullable = false)
-    public boolean screenReaderOptimized = false;
-
     @Column(name = "reduce_motion", nullable = false)
     public boolean reduceMotion = false;
 

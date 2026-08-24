@@ -7,6 +7,8 @@ import br.com.unify.matchable.common.dto.PageResponse;
 import br.com.unify.matchable.community.dto.CommunityCategoryResponse;
 import br.com.unify.matchable.community.dto.CommunityCommentResponse;
 import br.com.unify.matchable.community.dto.CommunityFeedResponse;
+import br.com.unify.matchable.community.dto.CommunityForYouPostResponse;
+import br.com.unify.matchable.community.dto.CommunityJoinRequestResponse;
 import br.com.unify.matchable.community.dto.CommunityLikeResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberHeaderResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberResponse;
@@ -27,7 +29,9 @@ public interface CommunityService {
 
     CommunityPageResponse listMyCommunities(User user, Integer page, Integer size);
 
-    CommunitySummaryResponse createCommunity(User user, String name, String description, Integer categoryId, byte[] iconBytes);
+    CommunityPageResponse discoverCommunities(User user, Integer categoryId, Integer page, Integer size);
+
+    CommunitySummaryResponse createCommunity(User user, String name, String description, Integer categoryId, String privacy, byte[] iconBytes);
 
     CommunitySummaryResponse updateCommunity(
             User user,
@@ -35,6 +39,7 @@ public interface CommunityService {
             String name,
             String description,
             Integer categoryId,
+            String privacy,
             byte[] iconBytes
     );
 
@@ -42,9 +47,17 @@ public interface CommunityService {
 
     CommunityFeedResponse getFeed(User user, UUID communityId, Integer page, Integer size);
 
+    PageResponse<CommunityForYouPostResponse> getForYouFeed(User user, Integer page, Integer size);
+
     CommunityMembershipResponse joinCommunity(User user, UUID communityId);
 
     CommunityMembershipResponse leaveCommunity(User user, UUID communityId);
+
+    PageResponse<CommunityJoinRequestResponse> listJoinRequests(User user, UUID communityId, Integer page, Integer size);
+
+    CommunityMemberHeaderResponse approveJoinRequest(User user, UUID communityId, UUID requestId);
+
+    void declineJoinRequest(User user, UUID communityId, UUID requestId);
 
     PageResponse<CommunityMemberHeaderResponse> listMembers(User user, UUID communityId, Integer page, Integer size);
 

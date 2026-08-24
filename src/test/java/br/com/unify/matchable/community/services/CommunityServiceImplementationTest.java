@@ -20,6 +20,7 @@ import br.com.unify.matchable.community.dto.CommunityMemberHeaderResponse;
 import br.com.unify.matchable.community.entity.Community;
 import br.com.unify.matchable.community.entity.CommunityMembership;
 import br.com.unify.matchable.community.enums.CommunityMemberRole;
+import br.com.unify.matchable.community.enums.CommunityPrivacy;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserProfile;
 
@@ -46,6 +47,35 @@ class CommunityServiceImplementationTest {
 
         assertInstanceOf(SecurityException.class, exception.getCause());
         assertEquals("Você não tem permissão para alterar o nível deste membro", exception.getCause().getMessage());
+    }
+
+    @Test
+    void resolvePrivacyDefaultsToFallbackWhenAbsent() {
+        CommunityServiceImplementation service = new CommunityServiceImplementation();
+
+        assertEquals(CommunityPrivacy.PUBLIC, service.resolvePrivacy(null, CommunityPrivacy.PUBLIC));
+        assertEquals(CommunityPrivacy.PRIVATE, service.resolvePrivacy("  ", CommunityPrivacy.PRIVATE));
+        assertEquals(CommunityPrivacy.PUBLIC, service.resolvePrivacy(null, null));
+    }
+
+    @Test
+    void resolvePrivacyParsesValueIgnoringCase() {
+        CommunityServiceImplementation service = new CommunityServiceImplementation();
+
+        assertEquals(CommunityPrivacy.PRIVATE, service.resolvePrivacy("private", CommunityPrivacy.PUBLIC));
+        assertEquals(CommunityPrivacy.PUBLIC, service.resolvePrivacy(" PUBLIC ", CommunityPrivacy.PRIVATE));
+    }
+
+    @Test
+    void resolvePrivacyRejectsUnknownValue() {
+        CommunityServiceImplementation service = new CommunityServiceImplementation();
+
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> service.resolvePrivacy("INVITE_ONLY", CommunityPrivacy.PUBLIC)
+        );
+
+        assertEquals("Visibilidade de comunidade inválida", exception.getMessage());
     }
 
     @Test

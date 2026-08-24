@@ -16,6 +16,8 @@ import br.com.unify.matchable.community.dto.CommunityAuthorResponse;
 import br.com.unify.matchable.community.dto.CommunityCategoryResponse;
 import br.com.unify.matchable.community.dto.CommunityCommentResponse;
 import br.com.unify.matchable.community.dto.CommunityFeedResponse;
+import br.com.unify.matchable.community.dto.CommunityForYouPostResponse;
+import br.com.unify.matchable.community.dto.CommunityJoinRequestResponse;
 import br.com.unify.matchable.community.dto.CommunityLikeResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberHeaderResponse;
 import br.com.unify.matchable.community.dto.CommunityMemberResponse;
@@ -25,11 +27,13 @@ import br.com.unify.matchable.community.dto.CommunityPostResponse;
 import br.com.unify.matchable.community.dto.CommunitySummaryResponse;
 import br.com.unify.matchable.community.entity.Community;
 import br.com.unify.matchable.community.entity.CommunityCategory;
+import br.com.unify.matchable.community.entity.CommunityJoinRequest;
 import br.com.unify.matchable.community.entity.CommunityMembership;
 import br.com.unify.matchable.community.entity.CommunityPost;
 import br.com.unify.matchable.community.entity.CommunityPostComment;
 import br.com.unify.matchable.community.entity.CommunityPostLike;
 import br.com.unify.matchable.community.enums.CommunityMemberRole;
+import br.com.unify.matchable.community.enums.CommunityPrivacy;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserProfile;
 import br.com.unify.matchable.user.entity.UserProfileImage;
@@ -67,6 +71,10 @@ public class CommunityServiceImplementation implements CommunityService {
     private static final String LIKE_DELETE_FORBIDDEN_MESSAGE = "Você não tem permissão para remover esta curtida";
     private static final String AUTHOR_AVATAR_NOT_FOUND_MESSAGE = "Avatar do autor não encontrado";
     private static final String MEMBERSHIP_REQUIRED_MESSAGE = "Você precisa participar da comunidade para interagir";
+    private static final String COMMUNITY_PRIVACY_INVALID_MESSAGE = "Visibilidade de comunidade inválida";
+    private static final String JOIN_REQUEST_NOT_FOUND_MESSAGE = "Solicitação de entrada não encontrada";
+    private static final String JOIN_REQUEST_MANAGE_FORBIDDEN_MESSAGE = "Apenas administradores ou moderadores podem gerenciar solicitações de entrada";
+    private static final String MEMBERSHIP_OR_REQUEST_NOT_FOUND_MESSAGE = "Você não participa nem possui solicitação pendente nesta comunidade";
     private static final String COMMUNITY_ICON_URL_SUFFIX = "/icon";
     private static final String POST_MEDIA_URL_PREFIX = "/communities/posts/";
     private static final String POST_MEDIA_URL_SUFFIX = "/media";
@@ -181,6 +189,7 @@ public class CommunityServiceImplementation implements CommunityService {
             String name,
             String description,
             Integer categoryId,
+            String privacy,
             byte[] iconBytes
     ) {
         UserProfile ownerProfile = requireUserProfile(user);
@@ -191,6 +200,7 @@ public class CommunityServiceImplementation implements CommunityService {
         community.description = normalizeText(description);
         community.owner = user;
         community.category = resolveCategory(categoryId);
+        community.privacy = resolvePrivacy(privacy, CommunityPrivacy.PUBLIC);
         community.active = true;
         community.featured = false;
         if (iconBytes != null && iconBytes.length > 0) {
@@ -209,9 +219,6 @@ public class CommunityServiceImplementation implements CommunityService {
         return toCommunitySummaryResponse(community, user);
     }
 
-    // TODO(futuro): campo `visibility` (PUBLIC/PRIVATE/INVITE_ONLY) em Community,
-    // afetando listCommunities/searchCommunities e a permissão de joinCommunity.
-    // Fora de escopo desta semana — ver plano 01-SEMANA-12-08-a-26-08.md, seção 4.C.
     @Override
     @Transactional
     public CommunitySummaryResponse updateCommunity(
@@ -220,6 +227,7 @@ public class CommunityServiceImplementation implements CommunityService {
             String name,
             String description,
             Integer categoryId,
+            String privacy,
             byte[] iconBytes
     ) {
         Community community = requireCommunity(communityId);
@@ -228,6 +236,7 @@ public class CommunityServiceImplementation implements CommunityService {
         community.name = requireText(name, COMMUNITY_NAME_REQUIRED_MESSAGE);
         community.description = normalizeText(description);
         community.category = resolveCategory(categoryId);
+        community.privacy = resolvePrivacy(privacy, community.privacy);
         if (iconBytes != null && iconBytes.length > 0) {
             community.iconOid = oidImageService.toOidBlob(oidImageService.compressToJpeg(iconBytes));
         }
@@ -273,31 +282,217 @@ public class CommunityServiceImplementation implements CommunityService {
         Community community = requireCommunityOrDefault(communityId);
         UserProfile userProfile = requireUserProfile(user);
         CommunityMembership existingMembership = CommunityMembership.findByCommunityAndUserProfile(community, userProfile);
-        if (existingMembership == null) {
-            CommunityMembership membership = new CommunityMembership();
-            membership.id = UUIDv7Generator.generate();
-            membership.community = community;
-            membership.userProfile = userProfile;
-            membership.role = CommunityMemberRole.MEMBER;
-            membership.joinedAt = Instant.now();
-            membership.persist();
-            return toMembershipResponse(community, membership, user);
+        if (existingMembership != null) {
+            return toMembershipResponse(community, existingMembership, user, false);
         }
 
-        return toMembershipResponse(community, existingMembership, user);
+        if (community.privacy == CommunityPrivacy.PRIVATE) {
+            if (CommunityJoinRequest.findByCommunityAndUser(community, user) == null) {
+                CommunityJoinRequest joinRequest = new CommunityJoinRequest();
+                joinRequest.id = UUIDv7Generator.generate();
+                joinRequest.community = community;
+                joinRequest.userProfile = userProfile;
+                joinRequest.requestedAt = Instant.now();
+                joinRequest.persist();
+            }
+            return toMembershipResponse(community, null, user, true);
+        }
+
+        CommunityMembership membership = createMembership(community, userProfile, CommunityMemberRole.MEMBER);
+        return toMembershipResponse(community, membership, user, false);
     }
 
     @Override
     @Transactional
     public CommunityMembershipResponse leaveCommunity(User user, UUID communityId) {
         Community community = requireCommunityOrDefault(communityId);
-        CommunityMembership existingMembership = requireMembership(community, user);
+        CommunityMembership existingMembership = CommunityMembership.findByCommunityAndUser(community, user);
+        if (existingMembership == null) {
+            CommunityJoinRequest pendingRequest = CommunityJoinRequest.findByCommunityAndUser(community, user);
+            if (pendingRequest == null) {
+                throw new IllegalStateException(MEMBERSHIP_OR_REQUEST_NOT_FOUND_MESSAGE);
+            }
+            pendingRequest.delete();
+            return toMembershipResponse(community, null, user, false);
+        }
+
         if (isOwner(community, user)) {
             throw new IllegalStateException(COMMUNITY_OWNER_LEAVE_MESSAGE);
         }
 
         existingMembership.delete();
-        return toMembershipResponse(community, null, user);
+        return toMembershipResponse(community, null, user, false);
+    }
+
+    /*
+     * Descoberta de comunidades: prioriza afinidade de categoria (categorias das
+     * comunidades que o usuário já participa) e, dentro de cada grupo, ordena por
+     * engajamento (membros, publicações e curtidas). Mesmo trade-off de memória
+     * documentado em listCommunities: aceitável na escala atual.
+     */
+    @Override
+    public CommunityPageResponse discoverCommunities(User user, Integer categoryId, Integer page, Integer size) {
+        int resolvedPage = validatePage(page);
+        int resolvedSize = validateSize(size);
+
+        List<Community> matches = categoryId != null
+                ? Community.<Community>find("active = true and category.id = ?1", categoryId).list()
+                : Community.<Community>find("active = true").list();
+
+        java.util.Set<Integer> affinityCategoryIds = CommunityMembership
+                .<CommunityMembership>list("userProfile.user = ?1 and community.active = true", user)
+                .stream()
+                .map(membership -> membership.community.category)
+                .filter(java.util.Objects::nonNull)
+                .map(category -> category.id)
+                .collect(java.util.stream.Collectors.toSet());
+
+        java.util.Map<UUID, Long> engagementByCommunity = new java.util.HashMap<>();
+        for (Community community : matches) {
+            long members = CommunityMembership.countByCommunity(community);
+            long posts = CommunityPost.count("community", community);
+            long likes = CommunityPostLike.count("post.community", community);
+            engagementByCommunity.put(community.id, members * 3 + posts * 2 + likes);
+        }
+
+        Comparator<Community> ordering = Comparator
+                .comparing((Community community) -> isUserMember(community, user))
+                .thenComparing(community -> community.category == null
+                        || !affinityCategoryIds.contains(community.category.id))
+                .thenComparing(Comparator.<Community>comparingLong(community ->
+                        engagementByCommunity.getOrDefault(community.id, 0L)).reversed())
+                .thenComparing(community -> community.name, String.CASE_INSENSITIVE_ORDER);
+
+        List<Community> ordered = matches.stream().sorted(ordering).toList();
+        long totalElements = ordered.size();
+        List<Community> pageItems = paginate(ordered, resolvedPage, resolvedSize);
+        return toCommunityPageResponse(pageItems, user, resolvedPage, resolvedSize, totalElements);
+    }
+
+    @Override
+    public PageResponse<CommunityForYouPostResponse> getForYouFeed(User user, Integer page, Integer size) {
+        int resolvedPage = validatePage(page);
+        int resolvedSize = validateSize(size);
+
+        PanacheQuery<CommunityPost> query = CommunityPost.find(
+                "community.active = true and community in "
+                        + "(select membership.community from CommunityMembership membership where membership.userProfile.user = ?1) "
+                        + "order by createdAt desc, id desc",
+                user
+        );
+        long totalElements = query.count();
+        List<CommunityForYouPostResponse> posts = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
+                .map(post -> new CommunityForYouPostResponse(
+                        post.community.id,
+                        post.community.name,
+                        post.community.iconOid == null ? null : "/communities/" + post.community.id + COMMUNITY_ICON_URL_SUFFIX,
+                        toPostResponse(post, user)
+                ))
+                .toList();
+
+        return PageResponse.of(posts, resolvedPage, resolvedSize, totalElements);
+    }
+
+    @Override
+    public PageResponse<CommunityJoinRequestResponse> listJoinRequests(User user, UUID communityId, Integer page, Integer size) {
+        int resolvedPage = validatePage(page);
+        int resolvedSize = validateSize(size);
+
+        Community community = requireCommunity(communityId);
+        ensureCanManageJoinRequests(user, community);
+
+        PanacheQuery<CommunityJoinRequest> query = CommunityJoinRequest.queryByCommunity(community);
+        long totalElements = query.count();
+        List<CommunityJoinRequestResponse> requests = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
+                .map(this::toJoinRequestResponse)
+                .toList();
+
+        return PageResponse.of(requests, resolvedPage, resolvedSize, totalElements);
+    }
+
+    @Override
+    @Transactional
+    public CommunityMemberHeaderResponse approveJoinRequest(User user, UUID communityId, UUID requestId) {
+        CommunityJoinRequest joinRequest = requireJoinRequest(user, communityId, requestId);
+
+        Community community = joinRequest.community;
+        UserProfile requesterProfile = joinRequest.userProfile;
+        joinRequest.delete();
+
+        CommunityMembership membership = CommunityMembership.findByCommunityAndUserProfile(community, requesterProfile);
+        if (membership == null) {
+            membership = createMembership(community, requesterProfile, CommunityMemberRole.MEMBER);
+        }
+        return toMemberHeaderResponse(membership);
+    }
+
+    @Override
+    @Transactional
+    public void declineJoinRequest(User user, UUID communityId, UUID requestId) {
+        requireJoinRequest(user, communityId, requestId).delete();
+    }
+
+    private CommunityJoinRequest requireJoinRequest(User user, UUID communityId, UUID requestId) {
+        if (requestId == null) {
+            throw new IllegalArgumentException("Informe o identificador da solicitação de entrada");
+        }
+
+        Community community = requireCommunity(communityId);
+        ensureCanManageJoinRequests(user, community);
+
+        CommunityJoinRequest joinRequest = CommunityJoinRequest.findByIdAndCommunity(requestId, community);
+        if (joinRequest == null) {
+            throw new NoSuchElementException(JOIN_REQUEST_NOT_FOUND_MESSAGE);
+        }
+        return joinRequest;
+    }
+
+    private void ensureCanManageJoinRequests(User user, Community community) {
+        CommunityMembership membership = CommunityMembership.findByCommunityAndUser(community, user);
+        if (!isElevated(membership)) {
+            throw new SecurityException(JOIN_REQUEST_MANAGE_FORBIDDEN_MESSAGE);
+        }
+    }
+
+    private CommunityMembership createMembership(Community community, UserProfile userProfile, CommunityMemberRole role) {
+        CommunityMembership membership = new CommunityMembership();
+        membership.id = UUIDv7Generator.generate();
+        membership.community = community;
+        membership.userProfile = userProfile;
+        membership.role = role;
+        membership.joinedAt = Instant.now();
+        membership.persist();
+        return membership;
+    }
+
+    private CommunityJoinRequestResponse toJoinRequestResponse(CommunityJoinRequest joinRequest) {
+        UserProfile profile = joinRequest.userProfile;
+        User requester = profile == null ? null : profile.user;
+        return new CommunityJoinRequestResponse(
+                joinRequest.id,
+                profile == null ? null : profile.id,
+                requester == null ? null : buildAuthorName(requester),
+                hasAvatar(profile) && requester != null && requester.id != null
+                        ? AUTHOR_AVATAR_URL_PREFIX + requester.id + AUTHOR_AVATAR_URL_SUFFIX
+                        : null,
+                joinRequest.requestedAt
+        );
+    }
+
+    private boolean isUserMember(Community community, User user) {
+        return user != null && CommunityMembership.findByCommunityAndUser(community, user) != null;
+    }
+
+    CommunityPrivacy resolvePrivacy(String privacy, CommunityPrivacy fallback) {
+        String normalized = normalizeText(privacy);
+        if (normalized == null) {
+            return fallback == null ? CommunityPrivacy.PUBLIC : fallback;
+        }
+        try {
+            return CommunityPrivacy.valueOf(normalized.toUpperCase());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(COMMUNITY_PRIVACY_INVALID_MESSAGE);
+        }
     }
 
     @Override
@@ -306,6 +501,8 @@ public class CommunityServiceImplementation implements CommunityService {
         int resolvedSize = validateSize(size);
 
         Community community = requireCommunity(communityId);
+        // A lista de membros e conteudo interno: so quem participa da comunidade pode ler.
+        requireMembership(community, user);
         PanacheQuery<CommunityMembership> query = CommunityMembership.queryByCommunity(community);
         long totalElements = query.count();
         List<CommunityMemberHeaderResponse> members = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
@@ -676,6 +873,9 @@ public class CommunityServiceImplementation implements CommunityService {
 
     private CommunitySummaryResponse toCommunitySummaryResponse(Community community, User user) {
         CommunityMembership membership = user == null ? null : CommunityMembership.findByCommunityAndUser(community, user);
+        boolean hasPendingRequest = membership == null
+                && user != null
+                && CommunityJoinRequest.findByCommunityAndUser(community, user) != null;
         return new CommunitySummaryResponse(
                 community.id,
                 community.name,
@@ -686,17 +886,25 @@ public class CommunityServiceImplementation implements CommunityService {
                 toAuthorResponse(community.owner),
                 membership == null ? null : membership.role,
                 isOwner(community, user),
-                toCategoryResponse(community.category)
+                toCategoryResponse(community.category),
+                community.privacy,
+                hasPendingRequest
         );
     }
 
-    private CommunityMembershipResponse toMembershipResponse(Community community, CommunityMembership membership, User currentUser) {
+    private CommunityMembershipResponse toMembershipResponse(
+            Community community,
+            CommunityMembership membership,
+            User currentUser,
+            boolean pendingRequest
+    ) {
         return new CommunityMembershipResponse(
                 community.id,
                 membership != null,
                 CommunityMembership.countByCommunity(community),
                 membership == null ? null : membership.role,
-                isOwner(community, currentUser)
+                isOwner(community, currentUser),
+                pendingRequest
         );
     }
 

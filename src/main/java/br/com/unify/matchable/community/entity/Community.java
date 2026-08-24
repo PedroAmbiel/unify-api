@@ -6,10 +6,13 @@ import java.util.UUID;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import br.com.unify.matchable.community.enums.CommunityPrivacy;
 import br.com.unify.matchable.user.entity.User;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Id;
@@ -50,6 +53,10 @@ public class Community extends PanacheEntityBase {
 
     @Column(name = "featured", nullable = false)
     public boolean featured;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "privacy", nullable = false, length = 20)
+    public CommunityPrivacy privacy = CommunityPrivacy.PUBLIC;
 
     public static Community findFeedCommunity() {
         Community featuredCommunity = find("active = true and featured = true order by id").firstResult();

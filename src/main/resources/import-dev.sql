@@ -23,18 +23,25 @@ insert into
 insert into user_profiles(id, fk_user)
 values ('01972a85-e1fd-7309-8f49-7d2168c18c11', '019dbf9a-5a8e-72de-85cb-8426b424c6fe');
 
-insert into communities(id, active, featured, description, name, fk_owner_user)
+insert into communities(id, active, featured, description, name, fk_owner_user, privacy)
 values ('01972a85-e1fd-7309-8f49-7d2168c18a11', true, true,
     'Espaço da comunidade Unify para compartilhar experiências, apoio e novidades sobre acessibilidade e conexão.',
     'Comunidade Unify',
-    '019dbf9a-5a8e-72de-85cb-8426b424c6fe');
+    '019dbf9a-5a8e-72de-85cb-8426b424c6fe', 'PUBLIC');
 
-insert into communities(id, active, featured, description, name, fk_owner_user)
+insert into communities(id, active, featured, description, name, fk_owner_user, privacy)
 values ('01972a85-e1fc-7309-8f49-7d2168c18a11', true, true,
         'Espaço da comunidade Unify para compartilhar experiências, apoio e novidades sobre acessibilidade e conexão.',
         'Teste Unify',
-        '019dbf9a-5a8e-72de-85cb-8426b424c6fe');
+        '019dbf9a-5a8e-72de-85cb-8426b424c6fe', 'PUBLIC');
+
+insert into communities(id, active, featured, description, name, fk_owner_user, privacy)
+values ('01972a85-e1fb-7309-8f49-7d2168c18a11', true, false,
+        'Comunidade privada de teste: entrada precisa ser aprovada por moderação.',
+        'Unify Privada',
+        '019dbf9a-5a8e-72de-85cb-8426b424c6fe', 'PRIVATE');
 
 insert into community_memberships(id, fk_community, fk_user_profile, role, joined_at)
 values ('01972a85-e1fd-7309-8f49-7d2168c18b11', '01972a85-e1fd-7309-8f49-7d2168c18a11', '01972a85-e1fd-7309-8f49-7d2168c18c11', 'ADMIN', '2024-06-01T00:00:00Z'),
-       ('01972a85-e1fc-7309-8f49-7d2168c18b11', '01972a85-e1fc-7309-8f49-7d2168c18a11', '01972a85-e1fd-7309-8f49-7d2168c18c11', 'ADMIN', '2024-06-01T00:00:00Z');
+       ('01972a85-e1fc-7309-8f49-7d2168c18b11', '01972a85-e1fc-7309-8f49-7d2168c18a11', '01972a85-e1fd-7309-8f49-7d2168c18c11', 'ADMIN', '2024-06-01T00:00:00Z'),
+       ('01972a85-e1fb-7309-8f49-7d2168c18b11', '01972a85-e1fb-7309-8f49-7d2168c18a11', '01972a85-e1fd-7309-8f49-7d2168c18c11', 'ADMIN', '2024-06-01T00:00:00Z');

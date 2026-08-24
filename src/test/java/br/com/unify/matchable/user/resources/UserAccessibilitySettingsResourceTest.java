@@ -54,7 +54,6 @@ class UserAccessibilitySettingsResourceTest {
                 .body("fontScale", equalTo("MEDIUM"))
                 .body("fontScaleMultiplier", equalTo(1.0f))
                 .body("highContrast", equalTo(false))
-                .body("screenReaderOptimized", equalTo(false))
                 .body("reduceMotion", equalTo(false));
     }
 
@@ -69,7 +68,6 @@ class UserAccessibilitySettingsResourceTest {
                         {
                           "fontScale": "LARGE",
                           "highContrast": true,
-                          "screenReaderOptimized": true,
                           "reduceMotion": false
                         }
                         """)
@@ -80,7 +78,6 @@ class UserAccessibilitySettingsResourceTest {
                 .body("fontScale", equalTo("LARGE"))
                 .body("fontScaleMultiplier", equalTo(1.15f))
                 .body("highContrast", equalTo(true))
-                .body("screenReaderOptimized", equalTo(true))
                 .body("reduceMotion", equalTo(false));
 
         given()
@@ -90,8 +87,7 @@ class UserAccessibilitySettingsResourceTest {
         .then()
                 .statusCode(200)
                 .body("fontScale", equalTo("LARGE"))
-                .body("highContrast", equalTo(true))
-                .body("screenReaderOptimized", equalTo(true));
+                .body("highContrast", equalTo(true));
     }
 
     @Test
@@ -108,7 +104,6 @@ class UserAccessibilitySettingsResourceTest {
                 .statusCode(200)
                 .body("fontScale", equalTo("MEDIUM"))
                 .body("highContrast", equalTo(false))
-                .body("screenReaderOptimized", equalTo(false))
                 .body("reduceMotion", equalTo(false));
     }
 

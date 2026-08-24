@@ -9,6 +9,7 @@ public record CommunityMembershipResponse(
         Boolean isMember,
         Long memberCount,
         CommunityMemberRole role,
-        Boolean isOwner
+        Boolean isOwner,
+        Boolean pendingRequest
 ) {
 }

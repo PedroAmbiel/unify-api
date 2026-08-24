@@ -45,7 +45,6 @@ class UserAccessibilitySettingsServiceImplementationTest {
         assertEquals(FontScaleOption.MEDIUM, response.fontScale());
         assertEquals(FontScaleOption.MEDIUM.getMultiplier(), response.fontScaleMultiplier());
         assertFalse(response.highContrast());
-        assertFalse(response.screenReaderOptimized());
         assertFalse(response.reduceMotion());
     }
 
@@ -54,7 +53,7 @@ class UserAccessibilitySettingsServiceImplementationTest {
         User user = persistUser("save-settings-" + UUID.randomUUID() + "@example.com");
 
         UserAccessibilitySettingsUpsertRequest firstRequest =
-                new UserAccessibilitySettingsUpsertRequest(FontScaleOption.LARGE, true, true, false);
+                new UserAccessibilitySettingsUpsertRequest(FontScaleOption.LARGE, true, false);
         UserAccessibilitySettingsResponse firstResponse = QuarkusTransaction.requiringNew()
                 .call(() -> service.saveSettings(User.findById(user.id), firstRequest));
 
@@ -63,13 +62,12 @@ class UserAccessibilitySettingsServiceImplementationTest {
         assertEquals(1L, countSettingsForUser(user));
 
         UserAccessibilitySettingsUpsertRequest secondRequest =
-                new UserAccessibilitySettingsUpsertRequest(FontScaleOption.EXTRA_LARGE, false, true, true);
+                new UserAccessibilitySettingsUpsertRequest(FontScaleOption.EXTRA_LARGE, false, true);
         UserAccessibilitySettingsResponse secondResponse = QuarkusTransaction.requiringNew()
                 .call(() -> service.saveSettings(User.findById(user.id), secondRequest));
 
         assertEquals(FontScaleOption.EXTRA_LARGE, secondResponse.fontScale());
         assertFalse(secondResponse.highContrast());
-        assertTrue(secondResponse.screenReaderOptimized());
         assertTrue(secondResponse.reduceMotion());
         assertEquals(1L, countSettingsForUser(user));
     }

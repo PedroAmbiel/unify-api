@@ -118,6 +118,26 @@ public class CommunityResource {
         }
     }
 
+    @GET
+    @Path("/discover")
+    @Transactional
+    public Response discoverCommunities(
+            @QueryParam("page") Integer page,
+            @QueryParam("size") Integer size,
+            @QueryParam("categoryId") Integer categoryId
+    ) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(communityService.discoverCommunities(user, categoryId, page, size)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        }
+    }
+
     @POST
     @Consumes(MediaType.MULTIPART_FORM_DATA)
     @Transactional
@@ -125,6 +145,7 @@ public class CommunityResource {
             @RestForm("name") String name,
             @RestForm("description") String description,
             @RestForm("categoryId") Integer categoryId,
+            @RestForm("privacy") String privacy,
             @RestForm("icon") FileUpload icon
     ) {
         User user = findCurrentUser();
@@ -134,7 +155,7 @@ public class CommunityResource {
 
         try {
             return Response.status(Response.Status.CREATED)
-                    .entity(communityService.createCommunity(user, name, description, categoryId, readOptionalUploadedBytes(icon)))
+                    .entity(communityService.createCommunity(user, name, description, categoryId, privacy, readOptionalUploadedBytes(icon)))
                     .build();
         } catch (PayloadTooLargeException exception) {
             return payloadTooLargeResponse(exception.getMessage());
@@ -154,6 +175,7 @@ public class CommunityResource {
             @RestForm("name") String name,
             @RestForm("description") String description,
             @RestForm("categoryId") Integer categoryId,
+            @RestForm("privacy") String privacy,
             @RestForm("icon") FileUpload icon
     ) {
         User user = findCurrentUser();
@@ -163,7 +185,7 @@ public class CommunityResource {
 
         try {
             return Response.ok(communityService.updateCommunity(
-                    user, communityId, name, description, categoryId, readOptionalUploadedBytes(icon)
+                    user, communityId, name, description, categoryId, privacy, readOptionalUploadedBytes(icon)
             )).build();
         } catch (PayloadTooLargeException exception) {
             return payloadTooLargeResponse(exception.getMessage());
@@ -219,6 +241,22 @@ public class CommunityResource {
         }
     }
 
+    @GET
+    @Path("/feed/me")
+    @Transactional
+    public Response getForYouFeed(@QueryParam("page") Integer page, @QueryParam("size") Integer size) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(communityService.getForYouFeed(user, page, size)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        }
+    }
+
     @POST
     @Path("/membership")
     @Transactional
@@ -260,6 +298,77 @@ public class CommunityResource {
     }
 
     @GET
+    @Path("/{communityId}/join-requests")
+    @Transactional
+    public Response listJoinRequests(
+            @PathParam("communityId") UUID communityId,
+            @QueryParam("page") Integer page,
+            @QueryParam("size") Integer size
+    ) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(communityService.listJoinRequests(user, communityId, page, size)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (SecurityException exception) {
+            return forbiddenResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @POST
+    @Path("/{communityId}/join-requests/{requestId}/approve")
+    @Transactional
+    public Response approveJoinRequest(
+            @PathParam("communityId") UUID communityId,
+            @PathParam("requestId") UUID requestId
+    ) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(communityService.approveJoinRequest(user, communityId, requestId)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (SecurityException exception) {
+            return forbiddenResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @DELETE
+    @Path("/{communityId}/join-requests/{requestId}")
+    @Transactional
+    public Response declineJoinRequest(
+            @PathParam("communityId") UUID communityId,
+            @PathParam("requestId") UUID requestId
+    ) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            communityService.declineJoinRequest(user, communityId, requestId);
+            return Response.noContent().build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (SecurityException exception) {
+            return forbiddenResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @GET
     @Path("/{communityId}/members")
     @Transactional
     public Response listMembers(
@@ -276,6 +385,8 @@ public class CommunityResource {
             return Response.ok(communityService.listMembers(user, communityId, page, size)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }

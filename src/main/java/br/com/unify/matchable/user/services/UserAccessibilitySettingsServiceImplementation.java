@@ -32,7 +32,6 @@ public class UserAccessibilitySettingsServiceImplementation implements UserAcces
         UserAccessibilitySettings settings = findOrCreate(user);
         settings.fontScale = request.fontScale() != null ? request.fontScale() : FontScaleOption.MEDIUM;
         settings.highContrast = Boolean.TRUE.equals(request.highContrast());
-        settings.screenReaderOptimized = Boolean.TRUE.equals(request.screenReaderOptimized());
         settings.reduceMotion = Boolean.TRUE.equals(request.reduceMotion());
         settings.lastUpdatedAt = Instant.now();
 
@@ -60,7 +59,6 @@ public class UserAccessibilitySettingsServiceImplementation implements UserAcces
                 settings.fontScale,
                 settings.fontScale.getMultiplier(),
                 settings.highContrast,
-                settings.screenReaderOptimized,
                 settings.reduceMotion
         );
     }
@@ -69,7 +67,6 @@ public class UserAccessibilitySettingsServiceImplementation implements UserAcces
         return new UserAccessibilitySettingsResponse(
                 FontScaleOption.MEDIUM,
                 FontScaleOption.MEDIUM.getMultiplier(),
-                false,
                 false,
                 false
         );

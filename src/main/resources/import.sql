@@ -31,6 +31,9 @@ create index if not exists idx_community_post_likes_post
 create index if not exists idx_community_memberships_community
     on community_memberships (fk_community);
 
+create index if not exists idx_community_join_requests_community
+    on community_join_requests (fk_community, requested_at asc, id asc);
+
 create index if not exists idx_communities_owner
     on communities (fk_owner_user);
 
