@@ -113,6 +113,7 @@ class UserMatchResourceTest {
         UUID imageId = UUID.randomUUID();
         service.mutualMatchesPageResponse = new MutualMatchPageResponse(
                 List.of(new MutualMatchSummaryResponse(
+                        UUID.randomUUID(),
                         userId,
                         profileId,
                         "Ana Souza",

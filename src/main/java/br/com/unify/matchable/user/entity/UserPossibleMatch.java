@@ -29,7 +29,8 @@ import jakarta.persistence.UniqueConstraint;
         indexes = {
                 @Index(name = "idx_user_possible_matches_starter", columnList = "fk_starter_user_profile"),
                 @Index(name = "idx_user_possible_matches_pending", columnList = "fk_pending_user_profile"),
-                @Index(name = "idx_user_possible_matches_pending_answer", columnList = "pending_accepted")
+                @Index(name = "idx_user_possible_matches_pending_answer", columnList = "pending_accepted"),
+                @Index(name = "idx_user_possible_matches_declined_at", columnList = "declined_at")
         }
 )
 public class UserPossibleMatch extends PanacheEntityBase {
@@ -54,6 +55,20 @@ public class UserPossibleMatch extends PanacheEntityBase {
 
     @Column(name = "pending_accepted")
     public Boolean pendingAccepted;
+
+    /**
+     * Momento em que o match foi recusado. Enquanto estiver dentro da carência
+     * (unify.match.decline-cooldown-days) o perfil recusado não volta ao feed de descoberta.
+     */
+    @Column(name = "declined_at")
+    public Instant declinedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(
+            name = "fk_declined_by_user_profile",
+            foreignKey = @ForeignKey(name = "fk_user_possible_matches_declined_by_user_profile")
+    )
+    public UserProfile declinedByProfile;
 
     public static UserPossibleMatch findByStarterAndPending(UserProfile starterProfile, UserProfile pendingProfile) {
         return find("starterProfile = ?1 and pendingProfile = ?2", starterProfile, pendingProfile).firstResult();
@@ -90,7 +105,37 @@ public class UserPossibleMatch extends PanacheEntityBase {
         ) > 0;
     }
 
-    public static long deleteDeclinedPendingMatches() {
-        return delete("pendingAccepted = false");
+    /** Recusas cujo período de carência já expirou — só essas podem ser apagadas. */
+    public static long deleteExpiredDeclines(Instant threshold) {
+        return delete("declinedAt is not null and declinedAt < ?1", threshold);
+    }
+
+    /** Perfis que o usuário recusou (ou que o recusaram) e ainda estão em carência. */
+    public static List<UserPossibleMatch> listActiveDeclines(UserProfile profile, Instant threshold) {
+        return list(
+                "(starterProfile = ?1 or pendingProfile = ?1) and declinedAt is not null and declinedAt >= ?2",
+                profile,
+                threshold
+        );
+    }
+
+    /**
+     * Recusas cuja carência já expirou: o perfil volta ao pool de descoberta, mas
+     * penalizado (MatchScoringPolicy.PENALTY_RESHOWN_AFTER_COOLDOWN).
+     */
+    public static List<UserPossibleMatch> listExpiredDeclines(UserProfile profile, Instant threshold) {
+        return list(
+                "(starterProfile = ?1 or pendingProfile = ?1) and declinedAt is not null and declinedAt < ?2",
+                profile,
+                threshold
+        );
+    }
+
+    public static UserPossibleMatch findBetween(UserProfile first, UserProfile second) {
+        return find(
+                "(starterProfile = ?1 and pendingProfile = ?2) or (starterProfile = ?2 and pendingProfile = ?1)",
+                first,
+                second
+        ).firstResult();
     }
 }

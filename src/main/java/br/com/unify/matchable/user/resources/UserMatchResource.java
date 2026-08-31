@@ -50,7 +50,12 @@ public class UserMatchResource {
         if (user == null) {
             return userNotFoundResponse();
         }
-        return Response.ok(userMatchService.getPotentialMatches(user, request)).build();
+
+        UserMatchService.DiscoveryResult result = userMatchService.discoverPotentialMatches(user, request);
+        return Response.ok(result.profileIds())
+                .header("X-Unify-Discovery-Mode", result.mode())
+                .header("X-Unify-Discovery-Count", result.profileIds().size())
+                .build();
     }
 
     @POST

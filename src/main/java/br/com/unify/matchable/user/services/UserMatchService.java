@@ -12,7 +12,28 @@ import br.com.unify.matchable.user.entity.User;
 
 public interface UserMatchService {
 
+    /** Modo normal: o usuário atual tem coordenada ativa e a distância participa do ranking. */
+    String DISCOVERY_MODE_GEO = "geo";
+
+    /** Modo degradado: sem coordenada do usuário atual, o fator distância sai da conta. */
+    String DISCOVERY_MODE_NO_LOCATION = "no-location";
+
+    /**
+     * Resultado da descoberta com o modo em que ela foi executada.
+     * O modo vira o cabeçalho X-Unify-Discovery-Mode na resposta REST (B5.6).
+     */
+    record DiscoveryResult(List<UUID> profileIds, String mode) {
+    }
+
     List<UUID> getPotentialMatches(User user, PotentialMatchesRequest request);
+
+    /**
+     * Mesma descoberta de {@link #getPotentialMatches}, expondo também o modo de execução.
+     * Default de compatibilidade: implementações antigas continuam válidas e reportam modo "geo".
+     */
+    default DiscoveryResult discoverPotentialMatches(User user, PotentialMatchesRequest request) {
+        return new DiscoveryResult(getPotentialMatches(user, request), DISCOVERY_MODE_GEO);
+    }
 
     MatchDecisionResponse registerDecision(User user, MatchDecisionRequest request);
 
