@@ -51,6 +51,10 @@ public class ChatServiceImplementation implements ChatService {
     private static final String CONVERSATION_NOT_FOUND = "Conversa não encontrada";
     private static final String NOT_A_PARTICIPANT = "Você não participa desta conversa";
     private static final String MEDIA_NOT_FOUND = "Mídia não encontrada";
+    private static final String MESSAGE_NOT_FOUND = "Mensagem não encontrada";
+    private static final String NOT_THE_SENDER = "Só quem enviou a mensagem pode alterá-la";
+    private static final String MESSAGE_DELETED = "Esta mensagem foi apagada";
+    private static final String DELETED_PREVIEW = "Mensagem apagada";
 
     private static final String INVALID_PAGE_MESSAGE =
             "O parâmetro 'page' deve ser maior ou igual a zero";
@@ -68,6 +72,9 @@ public class ChatServiceImplementation implements ChatService {
     @Override
     public ConversationListResponse listConversations(User user) {
         UserProfile currentProfile = requireProfile(user);
+
+        // O app do destinatário buscou as conversas: tudo que ele recebeu está "entregue".
+        ChatMessage.markAllAsDeliveredFor(currentProfile, Instant.now());
 
         List<Conversation> conversations = Conversation.listForParticipant(currentProfile);
         List<ConversationSummaryResponse> summaries = new ArrayList<>(conversations.size());
@@ -173,6 +180,11 @@ public class ChatServiceImplementation implements ChatService {
 
         UserProfile currentProfile = requireProfile(user);
         Conversation conversation = requireParticipation(conversationId, currentProfile);
+
+        // Buscar a conversa = receber as mensagens do outro: marca como entregues ANTES de
+        // ler, para que a própria resposta já traga deliveredAt e o cursor updatedAt
+        // fique atrás do serverTime devolvido (a mensagem não volta na rodada seguinte).
+        ChatMessage.markAsDelivered(conversation, currentProfile, Instant.now());
 
         long unread = ChatMessage.countUnreadFor(conversation, currentProfile);
 
@@ -296,6 +308,83 @@ public class ChatServiceImplementation implements ChatService {
         return new ChatReadResponse(conversation.id, marked, readAt);
     }
 
+    // ================= edição / exclusão =================
+
+    @Override
+    public ChatMessageResponse editMessage(User user, UUID conversationId, UUID messageId, String body) {
+        UserProfile currentProfile = requireProfile(user);
+        Conversation conversation = requireParticipation(conversationId, currentProfile);
+        ChatMessage message = requireOwnMessage(conversation, messageId, currentProfile);
+
+        if (message.isDeleted()) {
+            throw new IllegalStateException(MESSAGE_DELETED);
+        }
+        if (message.type != ChatMessageType.TEXT) {
+            throw new IllegalArgumentException("Só mensagens de texto podem ser editadas");
+        }
+
+        String normalizedBody = body == null ? "" : body.trim();
+        if (normalizedBody.isEmpty()) {
+            throw new IllegalArgumentException("A mensagem não pode estar vazia");
+        }
+        if (normalizedBody.length() > maxMessageLength) {
+            throw new IllegalArgumentException(
+                    "A mensagem excede o limite de " + maxMessageLength + " caracteres");
+        }
+
+        // Texto idêntico: nada muda, não marca como editada.
+        if (!normalizedBody.equals(message.body)) {
+            Instant now = Instant.now();
+            message.body = normalizedBody;
+            message.editedAt = now;
+            message.updatedAt = now;
+        }
+
+        return toMessageResponse(message, currentProfile);
+    }
+
+    @Override
+    public ChatMessageResponse deleteMessage(User user, UUID conversationId, UUID messageId) {
+        UserProfile currentProfile = requireProfile(user);
+        Conversation conversation = requireParticipation(conversationId, currentProfile);
+        ChatMessage message = requireOwnMessage(conversation, messageId, currentProfile);
+
+        // Idempotente: apagar de novo devolve o mesmo estado.
+        if (!message.isDeleted()) {
+            Instant now = Instant.now();
+            message.deletedAt = now;
+            message.updatedAt = now;
+            // Zera o conteúdo — a linha fica só como marcador no histórico. Em produção o
+            // trigger trg_chat_messages_update_large_object libera o large object.
+            message.body = null;
+            message.mediaOid = null;
+            message.mediaContentType = null;
+            message.mediaSizeBytes = null;
+            message.mediaDurationSeconds = null;
+        }
+
+        return toMessageResponse(message, currentProfile);
+    }
+
+    /**
+     * Mensagem da conversa informada, enviada pelo próprio usuário. 404 se não está na
+     * conversa (não revela mensagens de outras conversas), 403 se é do outro participante.
+     */
+    private ChatMessage requireOwnMessage(Conversation conversation, UUID messageId, UserProfile currentProfile) {
+        if (messageId == null) {
+            throw new IllegalArgumentException("O identificador da mensagem é obrigatório");
+        }
+
+        ChatMessage message = ChatMessage.findInConversation(conversation, messageId);
+        if (message == null) {
+            throw new NoSuchElementException(MESSAGE_NOT_FOUND);
+        }
+        if (message.sender == null || !Objects.equals(message.sender.id, currentProfile.id)) {
+            throw new SecurityException(NOT_THE_SENDER);
+        }
+        return message;
+    }
+
     // ================= apoio =================
 
     private ChatMessage newMessage(Conversation conversation, UserProfile sender, ChatMessageType type) {
@@ -305,7 +394,11 @@ public class ChatServiceImplementation implements ChatService {
         message.sender = sender;
         message.type = type;
         message.createdAt = Instant.now();
+        message.updatedAt = message.createdAt;
+        message.deliveredAt = null;
         message.readAt = null;
+        message.editedAt = null;
+        message.deletedAt = null;
         return message;
     }
 
@@ -338,7 +431,7 @@ public class ChatServiceImplementation implements ChatService {
             return null;
         }
 
-        String preview = switch (message.type) {
+        String preview = message.isDeleted() ? DELETED_PREVIEW : switch (message.type) {
             case TEXT -> truncate(message.body, PREVIEW_MAX_LENGTH);
             case IMAGE -> "Imagem";
             case AUDIO -> message.mediaDurationSeconds == null
@@ -365,12 +458,17 @@ public class ChatServiceImplementation implements ChatService {
                 message.sender != null && Objects.equals(message.sender.id, currentProfile.id),
                 message.type,
                 message.body,
-                message.type.isMedia() ? MEDIA_URL_PREFIX + message.id + MEDIA_URL_SUFFIX : null,
+                message.type.isMedia() && !message.isDeleted()
+                        ? MEDIA_URL_PREFIX + message.id + MEDIA_URL_SUFFIX
+                        : null,
                 message.mediaContentType,
                 message.mediaSizeBytes,
                 message.mediaDurationSeconds,
                 message.createdAt,
-                message.readAt
+                message.deliveredAt,
+                message.readAt,
+                message.editedAt,
+                message.deletedAt
         );
     }
 

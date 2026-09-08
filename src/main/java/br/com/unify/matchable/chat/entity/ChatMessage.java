@@ -32,6 +32,8 @@ import jakarta.persistence.Table;
         indexes = {
                 @Index(name = "idx_chat_messages_conversation_created_at",
                        columnList = "fk_conversation, created_at"),
+                @Index(name = "idx_chat_messages_conversation_updated_at",
+                       columnList = "fk_conversation, updated_at"),
                 @Index(name = "idx_chat_messages_sender", columnList = "fk_sender_user_profile"),
                 @Index(name = "idx_chat_messages_read_at", columnList = "read_at")
         }
@@ -85,9 +87,35 @@ public class ChatMessage extends PanacheEntityBase {
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;
 
+    /**
+     * Momento em que o destinatário BUSCOU a mensagem (lista de conversas ou conversa
+     * aberta). Nulo = só enviada. Segundo estado do indicador "enviada / entregue / vista".
+     */
+    @Column(name = "delivered_at")
+    public Instant deliveredAt;
+
     /** Momento em que o destinatário abriu a conversa. Nulo = não lida. */
     @Column(name = "read_at")
     public Instant readAt;
+
+    /** Última edição do texto pelo remetente. Nulo = nunca editada. */
+    @Column(name = "edited_at")
+    public Instant editedAt;
+
+    /**
+     * Exclusão LÓGICA: a linha continua no histórico (o cliente mostra "Mensagem
+     * apagada"), mas texto e mídia são zerados. Nulo = mensagem viva.
+     */
+    @Column(name = "deleted_at")
+    public Instant deletedAt;
+
+    /**
+     * Cursor do polling incremental. Muda em QUALQUER alteração visível (entrega,
+     * leitura, edição, exclusão), para que o outro participante receba a mudança
+     * na próxima rodada de {@code ?since=}.
+     */
+    @Column(name = "updated_at", nullable = false)
+    public Instant updatedAt;
 
     // ---- consultas ------------------------------------------------------
 
@@ -99,23 +127,37 @@ public class ChatMessage extends PanacheEntityBase {
         );
     }
 
-    /** Mensagens criadas DEPOIS de {@code since}, em ordem crescente (modo polling). */
+    /**
+     * Mensagens criadas OU alteradas depois de {@code since}, em ordem de criação
+     * (modo polling). Compara com {@code updatedAt}, não com {@code createdAt}: assim
+     * entrega, leitura, edição e exclusão também chegam ao outro lado.
+     */
     public static List<ChatMessage> listSince(Conversation conversation, Instant since) {
         return list(
-                "conversation = ?1 and createdAt > ?2 order by createdAt asc, id asc",
+                "conversation = ?1 and updatedAt > ?2 order by createdAt asc, id asc",
                 conversation,
                 since
         );
+    }
+
+    public static ChatMessage findInConversation(Conversation conversation, UUID messageId) {
+        if (conversation == null || messageId == null) {
+            return null;
+        }
+        return find("conversation = ?1 and id = ?2", conversation, messageId).firstResult();
     }
 
     public static ChatMessage findLastOfConversation(Conversation conversation) {
         return findByConversationNewestFirst(conversation).firstResult();
     }
 
-    /** Não lidas recebidas pelo perfil informado (ou seja, enviadas pelo OUTRO participante). */
+    /**
+     * Não lidas recebidas pelo perfil informado (ou seja, enviadas pelo OUTRO
+     * participante). Mensagens apagadas não contam.
+     */
     public static long countUnreadFor(Conversation conversation, UserProfile reader) {
         return count(
-                "conversation = ?1 and sender <> ?2 and readAt is null",
+                "conversation = ?1 and sender <> ?2 and readAt is null and deletedAt is null",
                 conversation,
                 reader
         );
@@ -124,17 +166,48 @@ public class ChatMessage extends PanacheEntityBase {
     public static long countAllUnreadFor(UserProfile reader) {
         return count(
                 "(conversation.participantOne = ?1 or conversation.participantTwo = ?1) "
-                        + "and sender <> ?1 and readAt is null",
+                        + "and sender <> ?1 and readAt is null and deletedAt is null",
                 reader
         );
     }
 
+    /** Marca como lidas (e, por consequência, entregues) as mensagens recebidas pelo leitor. */
     public static long markAsRead(Conversation conversation, UserProfile reader, Instant readAt) {
         return update(
-                "readAt = ?1 where conversation = ?2 and sender <> ?3 and readAt is null",
+                "readAt = ?1, deliveredAt = coalesce(deliveredAt, ?1), updatedAt = ?1 "
+                        + "where conversation = ?2 and sender <> ?3 and readAt is null",
                 readAt,
                 conversation,
                 reader
         );
+    }
+
+    /** Marca como entregues as mensagens que o leitor acabou de buscar nesta conversa. */
+    public static long markAsDelivered(Conversation conversation, UserProfile reader, Instant deliveredAt) {
+        return update(
+                "deliveredAt = ?1, updatedAt = ?1 "
+                        + "where conversation = ?2 and sender <> ?3 and deliveredAt is null",
+                deliveredAt,
+                conversation,
+                reader
+        );
+    }
+
+    /** Idem, para TODAS as conversas do leitor (usado ao listar as conversas). */
+    public static long markAllAsDeliveredFor(UserProfile reader, Instant deliveredAt) {
+        return update(
+                "deliveredAt = ?1, updatedAt = ?1 "
+                        + "where sender <> ?2 and deliveredAt is null "
+                        + "and conversation in (select c from Conversation c "
+                        + "where c.participantOne = ?2 or c.participantTwo = ?2)",
+                deliveredAt,
+                reader
+        );
+    }
+
+    // ---- helpers --------------------------------------------------------
+
+    public boolean isDeleted() {
+        return deletedAt != null;
     }
 }

@@ -35,4 +35,13 @@ public interface ChatService {
     ChatMediaPayload getMessageMedia(User user, UUID messageId);
 
     ChatReadResponse markConversationAsRead(User user, UUID conversationId);
+
+    /** Edita o texto de uma mensagem TEXT enviada pelo próprio usuário. */
+    ChatMessageResponse editMessage(User user, UUID conversationId, UUID messageId, String body);
+
+    /**
+     * Exclusão lógica de uma mensagem enviada pelo próprio usuário: a linha permanece
+     * no histórico, mas texto e mídia são removidos. Idempotente.
+     */
+    ChatMessageResponse deleteMessage(User user, UUID conversationId, UUID messageId);
 }

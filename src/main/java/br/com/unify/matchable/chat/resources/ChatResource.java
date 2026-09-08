@@ -22,6 +22,7 @@ import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
@@ -171,6 +172,60 @@ public class ChatResource {
             return Response.status(Response.Status.CREATED)
                     .entity(chatService.sendMediaMessage(user, conversationId, payload, caption))
                     .build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (SecurityException exception) {
+            return forbiddenResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    // PUT /chats/{conversationId}/messages/{messageId}  (edição de texto, só o remetente)
+    @PUT
+    @Path("/{conversationId}/messages/{messageId}")
+    @Transactional
+    public Response editMessage(
+            @PathParam("conversationId") UUID conversationId,
+            @PathParam("messageId") UUID messageId,
+            ChatMessageCreateRequest request
+    ) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(chatService.editMessage(
+                    user, conversationId, messageId, request == null ? null : request.body()))
+                    .build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (SecurityException exception) {
+            return forbiddenResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    // DELETE /chats/{conversationId}/messages/{messageId}  (exclusão lógica, só o remetente)
+    @DELETE
+    @Path("/{conversationId}/messages/{messageId}")
+    @Consumes(MediaType.WILDCARD)
+    @Transactional
+    public Response deleteMessage(
+            @PathParam("conversationId") UUID conversationId,
+            @PathParam("messageId") UUID messageId
+    ) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(chatService.deleteMessage(user, conversationId, messageId)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (SecurityException exception) {

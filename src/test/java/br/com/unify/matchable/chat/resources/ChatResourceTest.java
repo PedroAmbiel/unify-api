@@ -400,6 +400,323 @@ class ChatResourceTest {
                 .body("error", equalTo("VALIDATION_INVALID_FORMAT"));
     }
 
+    // ---------------------------------------------------------------- 12
+
+    @Test
+    void deliveryStatusProgressesFromSentToDeliveredToRead() {
+        TestUser alice = createUser("Alice", "Entrega");
+        TestUser bob = createUser("Bob", "Entrega");
+        String conversationId = openConversation(alice, createMatch(alice, bob, true));
+
+        String messageId = given()
+                .auth().oauth2(alice.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"oi bob\"}")
+        .when()
+                .post(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(201)
+                .body("deliveredAt", nullValue())
+                .body("readAt", nullValue())
+                .body("editedAt", nullValue())
+                .body("deletedAt", nullValue())
+                .extract().path("id");
+
+        // A própria remetente buscar a conversa NÃO entrega a mensagem.
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(200)
+                .body("messages.find { it.id == '" + messageId + "' }.deliveredAt", nullValue());
+
+        // Bob buscou a lista de conversas: entregue, mas ainda não vista.
+        given()
+                .auth().oauth2(bob.token())
+        .when()
+                .get(CHATS_PATH)
+        .then()
+                .statusCode(200);
+
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(200)
+                .body("messages.find { it.id == '" + messageId + "' }.deliveredAt", notNullValue())
+                .body("messages.find { it.id == '" + messageId + "' }.readAt", nullValue());
+
+        // Bob abriu a conversa: vista.
+        given()
+                .auth().oauth2(bob.token())
+        .when()
+                .put(CHATS_PATH + "/" + conversationId + "/read")
+        .then()
+                .statusCode(200)
+                .body("markedCount", equalTo(1));
+
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(200)
+                .body("messages.find { it.id == '" + messageId + "' }.deliveredAt", notNullValue())
+                .body("messages.find { it.id == '" + messageId + "' }.readAt", notNullValue());
+    }
+
+    // ---------------------------------------------------------------- 13
+
+    @Test
+    void statusChangesReachTheSenderThroughPolling() throws InterruptedException {
+        TestUser alice = createUser("Alice", "Cursor");
+        TestUser bob = createUser("Bob", "Cursor");
+        String conversationId = openConversation(alice, createMatch(alice, bob, true));
+
+        sendText(alice, conversationId, "status por polling");
+        Thread.sleep(25);
+
+        String serverTime = given()
+                .auth().oauth2(alice.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(200)
+                .extract().path("serverTime");
+
+        // Nada mudou: o polling não devolve a mensagem de novo.
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages?since=" + serverTime)
+        .then()
+                .statusCode(200)
+                .body("messages.size()", equalTo(0));
+
+        Thread.sleep(25);
+
+        given()
+                .auth().oauth2(bob.token())
+        .when()
+                .put(CHATS_PATH + "/" + conversationId + "/read")
+        .then()
+                .statusCode(200);
+
+        // A leitura moveu o cursor: a MESMA mensagem volta, agora com readAt.
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages?since=" + serverTime)
+        .then()
+                .statusCode(200)
+                .body("messages.size()", equalTo(1))
+                .body("messages[0].body", equalTo("status por polling"))
+                .body("messages[0].fromMe", equalTo(true))
+                .body("messages[0].readAt", notNullValue());
+    }
+
+    // ---------------------------------------------------------------- 14
+
+    @Test
+    void editOwnTextMessageMarksItEditedAndReachesTheOtherParticipant() throws InterruptedException {
+        TestUser alice = createUser("Alice", "Edicao");
+        TestUser bob = createUser("Bob", "Edicao");
+        String conversationId = openConversation(alice, createMatch(alice, bob, true));
+
+        String messageId = given()
+                .auth().oauth2(alice.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"texto original\"}")
+        .when()
+                .post(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        Thread.sleep(25);
+
+        String bobServerTime = given()
+                .auth().oauth2(bob.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(200)
+                .body("messages[0].body", equalTo("texto original"))
+                .extract().path("serverTime");
+
+        Thread.sleep(25);
+
+        given()
+                .auth().oauth2(alice.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"  texto corrigido  \"}")
+        .when()
+                .put(CHATS_PATH + "/" + conversationId + "/messages/" + messageId)
+        .then()
+                .statusCode(200)
+                .body("id", equalTo(messageId))
+                .body("body", equalTo("texto corrigido"))
+                .body("editedAt", notNullValue())
+                .body("deletedAt", nullValue());
+
+        // O polling do Bob recebe a versão editada.
+        given()
+                .auth().oauth2(bob.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages?since=" + bobServerTime)
+        .then()
+                .statusCode(200)
+                .body("messages.size()", equalTo(1))
+                .body("messages[0].id", equalTo(messageId))
+                .body("messages[0].body", equalTo("texto corrigido"))
+                .body("messages[0].editedAt", notNullValue());
+
+        // Texto vazio é rejeitado.
+        given()
+                .auth().oauth2(alice.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"   \"}")
+        .when()
+                .put(CHATS_PATH + "/" + conversationId + "/messages/" + messageId)
+        .then()
+                .statusCode(400)
+                .body("error", equalTo("VALIDATION_INVALID_FORMAT"));
+    }
+
+    // ---------------------------------------------------------------- 15
+
+    @Test
+    void editOrDeleteByTheOtherParticipantReturnsForbidden() {
+        TestUser alice = createUser("Alice", "Dona");
+        TestUser bob = createUser("Bob", "Intruso");
+        String conversationId = openConversation(alice, createMatch(alice, bob, true));
+
+        String messageId = given()
+                .auth().oauth2(alice.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"minha mensagem\"}")
+        .when()
+                .post(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        given()
+                .auth().oauth2(bob.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"tentativa\"}")
+        .when()
+                .put(CHATS_PATH + "/" + conversationId + "/messages/" + messageId)
+        .then()
+                .statusCode(403)
+                .body("error", equalTo("AUTH_FORBIDDEN"));
+
+        given()
+                .auth().oauth2(bob.token())
+        .when()
+                .delete(CHATS_PATH + "/" + conversationId + "/messages/" + messageId)
+        .then()
+                .statusCode(403)
+                .body("error", equalTo("AUTH_FORBIDDEN"));
+
+        // Mensagem inexistente na conversa: 404.
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .delete(CHATS_PATH + "/" + conversationId + "/messages/" + UUID.randomUUID())
+        .then()
+                .statusCode(404)
+                .body("error", equalTo("RESOURCE_NOT_FOUND"));
+
+        // Nada mudou.
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(200)
+                .body("messages[0].body", equalTo("minha mensagem"))
+                .body("messages[0].editedAt", nullValue())
+                .body("messages[0].deletedAt", nullValue());
+    }
+
+    // ---------------------------------------------------------------- 16
+
+    @Test
+    void deleteOwnMessageKeepsItInHistoryWithoutContent() {
+        TestUser alice = createUser("Alice", "Apaga");
+        TestUser bob = createUser("Bob", "Apaga");
+        String conversationId = openConversation(alice, createMatch(alice, bob, true));
+
+        sendText(alice, conversationId, "fica");
+        String messageId = given()
+                .auth().oauth2(alice.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"some\"}")
+        .when()
+                .post(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .delete(CHATS_PATH + "/" + conversationId + "/messages/" + messageId)
+        .then()
+                .statusCode(200)
+                .body("id", equalTo(messageId))
+                .body("type", equalTo("TEXT"))
+                .body("body", nullValue())
+                .body("mediaUrl", nullValue())
+                .body("deletedAt", notNullValue());
+
+        // Idempotente.
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .delete(CHATS_PATH + "/" + conversationId + "/messages/" + messageId)
+        .then()
+                .statusCode(200)
+                .body("deletedAt", notNullValue());
+
+        // Editar depois de apagar: conflito.
+        given()
+                .auth().oauth2(alice.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"volta\"}")
+        .when()
+                .put(CHATS_PATH + "/" + conversationId + "/messages/" + messageId)
+        .then()
+                .statusCode(409)
+                .body("error", equalTo("RESOURCE_CONFLICT"));
+
+        // O histórico do Bob mantém a linha, sem conteúdo, e ela não conta como não lida.
+        given()
+                .auth().oauth2(bob.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(200)
+                .body("totalElements", equalTo(2))
+                .body("unreadCount", equalTo(1))
+                .body("messages.find { it.id == '" + messageId + "' }.body", nullValue())
+                .body("messages.find { it.id == '" + messageId + "' }.deletedAt", notNullValue())
+                .body("messages.find { it.body == 'fica' }.deletedAt", nullValue());
+
+        // A prévia da lista de conversas reflete a exclusão.
+        given()
+                .auth().oauth2(bob.token())
+        .when()
+                .get(CHATS_PATH)
+        .then()
+                .statusCode(200)
+                .body("conversations[0].lastMessage.preview", equalTo("Mensagem apagada"))
+                .body("conversations[0].unreadCount", equalTo(1));
+    }
+
     // ---- apoio ----------------------------------------------------------
 
     private void sendText(TestUser sender, String conversationId, String body) {
