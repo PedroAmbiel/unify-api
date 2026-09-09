@@ -65,8 +65,8 @@ values ('01972a85-e1fd-7309-8f49-7d2168c18b11', '01972a85-e1fd-7309-8f49-7d2168c
 
 insert into
     users(id, verified, last_updated_at, birthdate, email, cellphone, last_name, name, password)
-    values ('019dd000-0000-4000-8000-00000000000a', true, '2025-01-01T00:00:00Z', '1996-03-10', 'seed.user.ana@unify.dev', '5511990000001', 'Ribeiro', 'Ana', '$2a$10$XN.aKcLxdVXB6GVy/MSrveH8.d0OGP.qpbi94SF2yZr0QT5iIWGOO'),
-           ('019dd000-0000-4000-8000-00000000000b', true, '2025-01-01T00:00:00Z', '1994-07-22', 'seed.user.bruno@unify.dev', '5511990000002', 'Martins', 'Bruno', '$2a$10$XN.aKcLxdVXB6GVy/MSrveH8.d0OGP.qpbi94SF2yZr0QT5iIWGOO');
+    values ('019dd000-0000-4000-8000-00000000000a', true, '2025-01-01T00:00:00Z', '1996-03-10', 'ana@unify.com', '5511990000001', 'Ribeiro', 'Ana', '$2a$10$XN.aKcLxdVXB6GVy/MSrveH8.d0OGP.qpbi94SF2yZr0QT5iIWGOO'),
+           ('019dd000-0000-4000-8000-00000000000b', true, '2025-01-01T00:00:00Z', '1994-07-22', 'bruno@unify.com', '5511990000002', 'Martins', 'Bruno', '$2a$10$XN.aKcLxdVXB6GVy/MSrveH8.d0OGP.qpbi94SF2yZr0QT5iIWGOO');
 
 insert into user_profiles(id, fk_user, bio, fk_gender, fk_pronouns, fk_autonomy_level, fk_energy_level)
 values ('019dd001-0000-4000-8000-00000000000a', '019dd000-0000-4000-8000-00000000000a',
