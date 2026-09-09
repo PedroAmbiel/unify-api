@@ -81,7 +81,7 @@ public interface CommunityService {
 
     byte[] getCommunityIcon(UUID communityId);
 
-    byte[] getPostMedia(UUID postId);
+    byte[] getPostMedia(User user, UUID postId);
 
     byte[] getAuthorAvatar(UUID userId);
 }

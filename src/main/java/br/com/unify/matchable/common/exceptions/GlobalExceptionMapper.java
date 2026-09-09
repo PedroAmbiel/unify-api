@@ -19,6 +19,9 @@ import java.util.NoSuchElementException;
  *   falando, nao um erro de negocio.
  * - ValidationException      -> 400 com o codigo de negocio da propria excecao.
  * - PayloadTooLargeException -> 413 VALIDATION_FILE_TOO_LARGE.
+ * - ForbiddenException       -> 403 AUTH_FORBIDDEN. Tipo proprio (nao
+ *   SecurityException) para nao capturar SecurityException incidental de
+ *   biblioteca.
  * - IllegalArgumentException -> 400 VALIDATION_INVALID_ARGUMENT (generico).
  *   NUNCA 409/USER_ALREADY_EXISTS: conflito de usuario e responsabilidade do
  *   AuthResource, que ja trata esse caso explicitamente no /auth/signup.
@@ -62,25 +65,31 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
             return build(ErrorCode.VALIDATION_FILE_TOO_LARGE, payloadTooLargeException.getMessage());
         }
 
-        // 4. Argumento invalido de negocio (400) - generico e honesto.
+        // 4. Acesso negado a recurso de negocio (403).
+        if (exception instanceof ForbiddenException forbiddenException) {
+            LOG.debugf("ForbiddenException: %s", forbiddenException.getMessage());
+            return build(ErrorCode.AUTH_FORBIDDEN, forbiddenException.getMessage());
+        }
+
+        // 5. Argumento invalido de negocio (400) - generico e honesto.
         if (exception instanceof IllegalArgumentException illegalArgumentException) {
             LOG.debugf("IllegalArgumentException: %s", illegalArgumentException.getMessage());
             return build(ErrorCode.VALIDATION_INVALID_ARGUMENT, illegalArgumentException.getMessage());
         }
 
-        // 5. Recurso inexistente (404).
+        // 6. Recurso inexistente (404).
         if (exception instanceof NoSuchElementException noSuchElementException) {
             LOG.debugf("NoSuchElementException: %s", noSuchElementException.getMessage());
             return build(ErrorCode.RESOURCE_NOT_FOUND, noSuchElementException.getMessage());
         }
 
-        // 6. Estado conflitante (409).
+        // 7. Estado conflitante (409).
         if (exception instanceof IllegalStateException illegalStateException) {
             LOG.debugf("IllegalStateException: %s", illegalStateException.getMessage());
             return build(ErrorCode.RESOURCE_CONFLICT, illegalStateException.getMessage());
         }
 
-        // 7. Falha inesperada (500). So aqui logamos como ERROR, com stack trace.
+        // 8. Falha inesperada (500). So aqui logamos como ERROR, com stack trace.
         LOG.error("Excecao nao tratada", exception);
         return build(ErrorCode.SYSTEM_INTERNAL_ERROR, null);
     }

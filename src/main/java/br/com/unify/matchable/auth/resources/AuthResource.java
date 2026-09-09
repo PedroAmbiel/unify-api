@@ -198,7 +198,7 @@ public class AuthResource {
     @POST
     @Path("/refresh")
     @PermitAll
-    @RateLimited
+    @RateLimited(limit = 60, windowSeconds = 60)
     @Transactional
     public Response refresh(RefreshTokenRequest request,
                             @HeaderParam("User-Agent") String userAgent,

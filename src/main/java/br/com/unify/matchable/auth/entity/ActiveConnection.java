@@ -56,4 +56,24 @@ public class ActiveConnection extends PanacheEntityBase {
     public static void revokeAllForUser(User user) {
         update("revoked = true where user = ?1 and revoked = false", user);
     }
+
+    /**
+     * Revoga a conexao condicionalmente (revoked = false -> true) para evitar
+     * lost update quando duas requisicoes concorrentes tentam usar o mesmo
+     * refresh token. Retorna quantas linhas foram afetadas (0 ou 1).
+     */
+    public static int revokeIfActive(UUID id) {
+        return update("revoked = true where id = ?1 and revoked = false", id);
+    }
+
+    /**
+     * Apaga conexoes revogadas ou expiradas ha mais de {@code retentionCutoff}.
+     * Nao ha coluna "revokedAt": para revogadas usamos createdAt como proxy da
+     * idade da linha (nao ha necessidade de guardar sessoes revogadas por muito
+     * tempo); para as nao revogadas, usamos expiresAt, que ja marca quando a
+     * sessao deixou de ser valida.
+     */
+    public static long deleteRevokedOrExpiredBefore(Instant retentionCutoff) {
+        return delete("(revoked = true and createdAt < ?1) or expiresAt < ?1", retentionCutoff);
+    }
 }

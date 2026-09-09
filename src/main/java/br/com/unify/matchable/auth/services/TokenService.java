@@ -59,8 +59,13 @@ public class TokenService {
             return null;
         }
 
-        connection.revoked = true;
-        connection.persist();
+        // Update condicional (revoked = false -> true): evita lost update quando
+        // duas requisicoes concorrentes tentam usar o mesmo refresh token - so a
+        // primeira consegue revogar e emitir novos tokens, a outra recebe 401.
+        int updated = ActiveConnection.revokeIfActive(connection.id);
+        if (updated == 0) {
+            return null;
+        }
 
         return generateTokens(connection.user, deviceInfo, ipAddress);
     }

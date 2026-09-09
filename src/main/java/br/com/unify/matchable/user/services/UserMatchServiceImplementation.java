@@ -209,37 +209,54 @@ public class UserMatchServiceImplementation implements UserMatchService {
         Instant now = Instant.now();
         boolean accepted = Boolean.TRUE.equals(request.accepted());
 
-        // 1) Existe convite recebido? responde a ele.
-        UserPossibleMatch inboundMatch = UserPossibleMatch.findByStarterAndPending(targetProfile, currentProfile);
-        if (inboundMatch != null) {
-            if (inboundMatch.pendingAccepted != null) {
-                throw new IllegalStateException("Este match já foi respondido");
-            }
-            inboundMatch.pendingAccepted = request.accepted();
-            if (!accepted) {
-                inboundMatch.declinedAt = now;
-                inboundMatch.declinedByProfile = currentProfile;
-            }
-            return toDecisionResponse(inboundMatch);
-        }
+        /*
+         * Máquina de estados POR PAR (não por direção).
+         *
+         * A tabela guarda uma linha direcional, mas a regra de negócio é sobre o PAR: quem já
+         * recusou define o estado do par inteiro. O código anterior resolvia o passo 1 olhando
+         * só `pendingAccepted != null`; uma linha (B→A) com `starterAccepted=false` e
+         * `declinedAt != null` aceitava `pendingAccepted=true` e nascia um par morto
+         * (false + true nunca vira match e nunca mais volta ao feed).
+         *
+         * REGRA: nunca `delete` aqui. V9__chat_conversations_and_messages.sql:17 declara
+         * `on delete cascade` de `conversations` para `user_possible_matches` — apagar a linha
+         * apagaria a conversa junto. Toda transição é mutação da linha existente.
+         */
+        UserPossibleMatch pairMatch = UserPossibleMatch.findBetween(currentProfile, targetProfile);
 
-        // 2) Já existe registro na direção oposta?
-        UserPossibleMatch existingOutboundMatch =
-                UserPossibleMatch.findByStarterAndPending(currentProfile, targetProfile);
+        if (pairMatch != null) {
+            if (pairMatch.declinedAt != null) {
+                if (!pairMatch.declinedAt.isBefore(declineThreshold())) {
+                    // Recusa ainda em carência: 409 (RESOURCE_CONFLICT). Vale para os dois lados
+                    // do par — inclusive para quem tenta "curtir de volta" quem o recusou.
+                    throw new IllegalStateException(
+                            "Este perfil não está disponível no momento. Tente novamente mais tarde.");
+                }
 
-        if (existingOutboundMatch != null) {
-            // Reapresentação após cooldown: permitir sobrescrever uma recusa antiga.
-            if (existingOutboundMatch.declinedAt != null) {
-                existingOutboundMatch.starterAccepted = accepted;
-                existingOutboundMatch.declinedAt = accepted ? null : now;
-                existingOutboundMatch.declinedByProfile = accepted ? null : currentProfile;
-                existingOutboundMatch.createdAt = now;
-                return toDecisionResponse(existingOutboundMatch);
+                // Carência expirada: o par renasce na direção de quem está decidindo agora.
+                return toDecisionResponse(restartPair(pairMatch, currentProfile, targetProfile, accepted, now));
             }
+
+            boolean currentIsPending = pairMatch.pendingProfile != null
+                    && Objects.equals(pairMatch.pendingProfile.id, currentProfile.id);
+
+            if (currentIsPending) {
+                // Convite recebido de verdade: responde a ele.
+                if (pairMatch.pendingAccepted != null) {
+                    throw new IllegalStateException("Este match já foi respondido");
+                }
+                pairMatch.pendingAccepted = request.accepted();
+                if (!accepted) {
+                    pairMatch.declinedAt = now;
+                    pairMatch.declinedByProfile = currentProfile;
+                }
+                return toDecisionResponse(pairMatch);
+            }
+
             throw new IllegalStateException("Você já registrou uma decisão para este perfil");
         }
 
-        // 3) Perfil novo: aceitar OU recusar — os dois passam a ser persistidos.
+        // Perfil novo: aceitar OU recusar — os dois passam a ser persistidos.
         UserPossibleMatch possibleMatch = new UserPossibleMatch();
         possibleMatch.id = UUIDv7Generator.generate();
         possibleMatch.starterProfile = currentProfile;
@@ -255,6 +272,48 @@ public class UserMatchServiceImplementation implements UserMatchService {
 
         possibleMatch.persist();
         return toDecisionResponse(possibleMatch);
+    }
+
+    /**
+     * Reapresentação após a carência: reaproveita a linha existente do par, invertendo a direção
+     * para que o starter passe a ser quem está decidindo agora (mesmo padrão que já era usado no
+     * caso "mesma direção"). Sem delete — ver comentário em {@link #registerDecision}.
+     *
+     * A inversão só é feita quando a linha encontrada está na direção oposta. Se, por dado
+     * legado/corrida, já existir uma linha na direção atual, ela é a que sofre a mutação — assim
+     * a unique constraint uq_user_possible_matches_starter_pending nunca é violada.
+     */
+    private UserPossibleMatch restartPair(
+            UserPossibleMatch pairMatch,
+            UserProfile currentProfile,
+            UserProfile targetProfile,
+            boolean accepted,
+            Instant now
+    ) {
+        UserPossibleMatch target = pairMatch;
+
+        boolean needsInversion = pairMatch.starterProfile == null
+                || !Objects.equals(pairMatch.starterProfile.id, currentProfile.id);
+
+        if (needsInversion) {
+            UserPossibleMatch sameDirection =
+                    UserPossibleMatch.findByStarterAndPending(currentProfile, targetProfile);
+            if (sameDirection != null) {
+                target = sameDirection;
+            } else {
+                pairMatch.starterProfile = currentProfile;
+                pairMatch.pendingProfile = targetProfile;
+            }
+        }
+
+        target.starterProfile = currentProfile;
+        target.pendingProfile = targetProfile;
+        target.starterAccepted = accepted;
+        target.pendingAccepted = null;
+        target.declinedAt = accepted ? null : now;
+        target.declinedByProfile = accepted ? null : currentProfile;
+        target.createdAt = now;
+        return target;
     }
 
     @Override
@@ -1041,12 +1100,15 @@ public class UserMatchServiceImplementation implements UserMatchService {
     }
 
     private List<UUID> collectPriorityInboundProfileIds(UserProfile currentProfile, Set<UUID> alreadyUsedProfileIds) {
-        return UserPossibleMatch.listInboundPending(currentProfile).stream()
+        List<UUID> inboundProfileIds = UserPossibleMatch.listInboundPending(currentProfile).stream()
                 .map(match -> match.starterProfile == null ? null : match.starterProfile.id)
                 .filter(Objects::nonNull)
                 .filter(profileId -> !alreadyUsedProfileIds.contains(profileId))
                 .distinct()
                 .toList();
+
+        // O caminho de convites não passa por SQL de candidato: aplica aqui as MESMAS exclusões.
+        return filterVisibleProfileIds(currentProfile, inboundProfileIds);
     }
 
     /**
@@ -1157,9 +1219,6 @@ public class UserMatchServiceImplementation implements UserMatchService {
                     from user_profiles up
                     join users u on u.id = up.fk_user
                     where up.id <> :currentProfileId
-                      and u.verified = true
-                      and (up.fk_gender in (%s) or up.fk_gender = 4) -- Id 4 é para prefiro não informar, então devem entrar em consideração
-                      %s
                       %s
                 ),
                 bounded as (
@@ -1184,7 +1243,7 @@ public class UserMatchServiceImplementation implements UserMatchService {
                 where distance_km <= :maxMatchDistanceKm
                 order by distance_km asc
                 limit :resultLimit
-                """.formatted(namedParameters("gender", desiredGenderIds.size()), ageClause(minAge, maxAge), decisionExclusionClause());
+                """.formatted(commonCandidateFilters(desiredGenderIds, minAge, maxAge));
 
         Query query = entityManager.createNativeQuery(sql);
         bindCommonParameters(query, currentProfile, desiredGenderIds, minAge, maxAge, declineThreshold);
@@ -1220,13 +1279,10 @@ public class UserMatchServiceImplementation implements UserMatchService {
                 from user_profiles up
                 join users u on u.id = up.fk_user
                 where up.id <> :currentProfileId
-                  and u.verified = true
-                  and (up.fk_gender in (%s) or up.fk_gender = 4)
-                  %s
                   %s
                 order by up.id desc
                 limit :resultLimit
-                """.formatted(namedParameters("gender", desiredGenderIds.size()), ageClause(minAge, maxAge), decisionExclusionClause());
+                """.formatted(commonCandidateFilters(desiredGenderIds, minAge, maxAge));
 
         Query query = entityManager.createNativeQuery(sql);
         bindCommonParameters(query, currentProfile, desiredGenderIds, minAge, maxAge, declineThreshold);
@@ -1259,9 +1315,6 @@ public class UserMatchServiceImplementation implements UserMatchService {
                 from user_profiles up
                 join users u on u.id = up.fk_user
                 where up.id <> :currentProfileId
-                  and u.verified = true
-                  and (up.fk_gender in (%s) or up.fk_gender = 4)
-                  %s
                   and not exists (
                       select 1 from user_coordinates c
                       where c.fk_user_profile = up.id and c.active = true
@@ -1269,7 +1322,7 @@ public class UserMatchServiceImplementation implements UserMatchService {
                   %s
                 order by up.id desc
                 limit :noLocationLimit
-                """.formatted(namedParameters("gender", desiredGenderIds.size()), ageClause(minAge, maxAge), decisionExclusionClause());
+                """.formatted(commonCandidateFilters(desiredGenderIds, minAge, maxAge));
 
         Query query = entityManager.createNativeQuery(sql);
         bindCommonParameters(query, currentProfile, desiredGenderIds, minAge, maxAge, declineThreshold);
@@ -1295,6 +1348,88 @@ public class UserMatchServiceImplementation implements UserMatchService {
             ageClause.append(" and u.birthdate > current_date - make_interval(years => :maxAgePlusOne)");
         }
         return ageClause.toString();
+    }
+
+    /**
+     * PONTO ÚNICO DE EXCLUSÃO (SQL).
+     *
+     * Fragmento compartilhado pelas TRÊS queries de candidato ({@link #executeCandidateQuery},
+     * {@link #executeNoLocationModeQuery} e {@link #executeNoCoordinateCandidateQuery}). Antes
+     * cada query repetia `verified`, gênero, faixa etária e exclusão de decisão à mão — quatro
+     * lugares para lembrar, e o caminho inbound não tinha nenhum.
+     *
+     * Pressupõe os aliases `up` (user_profiles) e `u` (users) e um `where` já aberto.
+     * O gêmeo em Java/JPQL é {@link #filterVisibleProfileIds(User, List)}.
+     */
+    private String commonCandidateFilters(List<Integer> desiredGenderIds, Integer minAge, Integer maxAge) {
+        return """
+                  and u.verified = true
+                  and (up.fk_gender in (%s) or up.fk_gender = 4) -- Id 4 é "prefiro não informar": entra em consideração
+                  %s
+                  %s
+                """.formatted(
+                namedParameters("gender", desiredGenderIds.size()),
+                ageClause(minAge, maxAge),
+                decisionExclusionClause()
+        );
+        // semana 04: UserBlock pluga aqui (e no gêmeo filterVisibleProfileIds). São os DOIS
+        // únicos pontos que precisam conhecer a nova regra de exclusão.
+    }
+
+    /**
+     * PONTO ÚNICO DE EXCLUSÃO (Java/JPQL) — gêmeo de {@link #commonCandidateFilters}.
+     *
+     * O caminho de convites recebidos ({@link #collectPriorityInboundProfileIds}) não passa por
+     * nenhuma das queries nativas: os ids vêm direto de user_possible_matches e são injetados no
+     * feed por {@link #insertPriorityMatches}. Sem este método, qualquer regra de exclusão nova
+     * (hoje a carência, na semana 04 o UserBlock) valeria para o feed orgânico e não para os
+     * convites — exatamente o furo que este método fecha.
+     *
+     * Uma única query: devolve os ids de {@code profileIds} que NÃO estão excluídos, preservando
+     * a ordem de entrada.
+     */
+    public List<UUID> filterVisibleProfileIds(User viewer, List<UUID> profileIds) {
+        if (viewer == null || profileIds == null || profileIds.isEmpty()) {
+            return List.of();
+        }
+        return filterVisibleProfileIds(requireProfile(viewer), profileIds);
+    }
+
+    List<UUID> filterVisibleProfileIds(UserProfile viewerProfile, List<UUID> profileIds) {
+        if (viewerProfile == null || profileIds == null || profileIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<UUID> candidates = profileIds.stream()
+                .filter(Objects::nonNull)
+                .filter(profileId -> !Objects.equals(profileId, viewerProfile.id))
+                .distinct()
+                .toList();
+
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+
+        // Mesma semântica de decisionExclusionClause(), em JPQL.
+        // semana 04: UserBlock pluga aqui (e no gêmeo commonCandidateFilters).
+        Set<UUID> excluded = new LinkedHashSet<>(entityManager.createQuery(
+                        "select case when m.starterProfile.id = :viewerId "
+                                + "then m.pendingProfile.id else m.starterProfile.id end "
+                                + "from UserPossibleMatch m "
+                                + "where ((m.starterProfile.id = :viewerId and m.pendingProfile.id in :profileIds) "
+                                + "    or (m.pendingProfile.id = :viewerId and m.starterProfile.id in :profileIds)) "
+                                + "  and ((m.declinedAt is null "
+                                + "         and (m.starterProfile.id = :viewerId or m.pendingAccepted is not null)) "
+                                + "    or (m.declinedAt is not null and m.declinedAt >= :declineThreshold))",
+                        UUID.class)
+                .setParameter("viewerId", viewerProfile.id)
+                .setParameter("profileIds", candidates)
+                .setParameter("declineThreshold", declineThreshold())
+                .getResultList());
+
+        return candidates.stream()
+                .filter(profileId -> !excluded.contains(profileId))
+                .toList();
     }
 
     /**

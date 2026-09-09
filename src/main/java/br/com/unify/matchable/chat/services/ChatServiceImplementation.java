@@ -24,6 +24,7 @@ import br.com.unify.matchable.chat.entity.ChatMessage;
 import br.com.unify.matchable.chat.entity.Conversation;
 import br.com.unify.matchable.chat.enums.ChatMessageType;
 import br.com.unify.matchable.common.UUIDv7Generator;
+import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.common.image.OidImageService;
 import br.com.unify.matchable.user.dto.UserProfileImageResponse;
 import br.com.unify.matchable.user.entity.User;
@@ -129,7 +130,7 @@ public class ChatServiceImplementation implements ChatService {
         boolean isPending = match.pendingProfile != null
                 && Objects.equals(match.pendingProfile.id, currentProfile.id);
         if (!isStarter && !isPending) {
-            throw new SecurityException("Você não participa deste match");
+            throw new ForbiddenException("Você não participa deste match");
         }
 
         // 2) O match precisa ser MÚTUO. Sem isso não existe conversa.
@@ -380,7 +381,7 @@ public class ChatServiceImplementation implements ChatService {
             throw new NoSuchElementException(MESSAGE_NOT_FOUND);
         }
         if (message.sender == null || !Objects.equals(message.sender.id, currentProfile.id)) {
-            throw new SecurityException(NOT_THE_SENDER);
+            throw new ForbiddenException(NOT_THE_SENDER);
         }
         return message;
     }
@@ -413,7 +414,7 @@ public class ChatServiceImplementation implements ChatService {
             throw new NoSuchElementException(CONVERSATION_NOT_FOUND);
         }
         if (!conversation.hasParticipant(currentProfile)) {
-            throw new SecurityException(NOT_A_PARTICIPANT);
+            throw new ForbiddenException(NOT_A_PARTICIPANT);
         }
         return conversation;
     }

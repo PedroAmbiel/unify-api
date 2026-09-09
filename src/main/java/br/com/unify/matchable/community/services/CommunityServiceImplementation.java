@@ -6,11 +6,13 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
+import java.util.function.BiFunction;
 import java.util.function.ToLongFunction;
 
 import br.com.unify.matchable.common.UUIDv7Generator;
 import br.com.unify.matchable.common.dto.PageParams;
 import br.com.unify.matchable.common.dto.PageResponse;
+import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.common.image.OidImageService;
 import br.com.unify.matchable.community.dto.CommunityAuthorResponse;
 import br.com.unify.matchable.community.dto.CommunityCategoryResponse;
@@ -263,6 +265,7 @@ public class CommunityServiceImplementation implements CommunityService {
         if (community == null) {
             return new CommunityFeedResponse(null, PageResponse.empty(resolvedPage, resolvedSize));
         }
+        requireReadableCommunity(community, user);
 
         PanacheQuery<CommunityPost> query = CommunityPost.queryByCommunity(community);
         long totalElements = query.count();
@@ -450,7 +453,7 @@ public class CommunityServiceImplementation implements CommunityService {
     private void ensureCanManageJoinRequests(User user, Community community) {
         CommunityMembership membership = CommunityMembership.findByCommunityAndUser(community, user);
         if (!isElevated(membership)) {
-            throw new SecurityException(JOIN_REQUEST_MANAGE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(JOIN_REQUEST_MANAGE_FORBIDDEN_MESSAGE);
         }
     }
 
@@ -559,7 +562,7 @@ public class CommunityServiceImplementation implements CommunityService {
         CommunityPost post = requirePost(postId);
         CommunityMembership actorMembership = requireMembership(post.community, user);
         if (!isContentOwner(user, post.author) && !isElevated(actorMembership)) {
-            throw new SecurityException(POST_DELETE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(POST_DELETE_FORBIDDEN_MESSAGE);
         }
 
         CommunityPostLike.delete("post", post);
@@ -613,7 +616,7 @@ public class CommunityServiceImplementation implements CommunityService {
         }
 
         if (!isContentOwner(user, targetUser) && !isElevated(actorMembership)) {
-            throw new SecurityException(LIKE_DELETE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(LIKE_DELETE_FORBIDDEN_MESSAGE);
         }
 
         like.delete();
@@ -630,6 +633,7 @@ public class CommunityServiceImplementation implements CommunityService {
         int resolvedSize = validateSize(size);
 
         CommunityPost post = requirePost(postId);
+        requireReadableCommunity(post.community, user);
         PanacheQuery<CommunityPostComment> query = CommunityPostComment.queryByPost(post);
         long totalElements = query.count();
         List<CommunityCommentResponse> comments = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
@@ -672,7 +676,7 @@ public class CommunityServiceImplementation implements CommunityService {
         }
 
         if (!isContentOwner(user, comment.author) && !isElevated(actorMembership)) {
-            throw new SecurityException(COMMENT_DELETE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(COMMENT_DELETE_FORBIDDEN_MESSAGE);
         }
 
         comment.delete();
@@ -689,8 +693,9 @@ public class CommunityServiceImplementation implements CommunityService {
     }
 
     @Override
-    public byte[] getPostMedia(UUID postId) {
+    public byte[] getPostMedia(User user, UUID postId) {
         CommunityPost post = requirePost(postId);
+        requireReadableCommunity(post.community, user);
         if (post.mediaOid == null) {
             throw new NoSuchElementException(POST_MEDIA_NOT_FOUND_MESSAGE);
         }
@@ -751,6 +756,28 @@ public class CommunityServiceImplementation implements CommunityService {
         return community;
     }
 
+    /**
+     * Leitura de conteúdo: comunidade PRIVATE só é visível para membros ativos.
+     * Para não vazar a existência da comunidade, o não-membro recebe 404 (e não 403).
+     */
+    void requireReadableCommunity(Community community, User user) {
+        requireReadableCommunity(community, user, CommunityMembership::findByCommunityAndUser);
+    }
+
+    void requireReadableCommunity(
+            Community community,
+            User user,
+            BiFunction<Community, User, CommunityMembership> membershipResolver
+    ) {
+        if (community == null || community.privacy != CommunityPrivacy.PRIVATE) {
+            return;
+        }
+
+        if (user == null || membershipResolver.apply(community, user) == null) {
+            throw new NoSuchElementException(COMMUNITY_NOT_FOUND_MESSAGE);
+        }
+    }
+
     private CommunityMembership requireMembership(Community community, User user) {
         CommunityMembership membership = CommunityMembership.findByCommunityAndUser(community, user);
         if (membership == null) {
@@ -789,7 +816,7 @@ public class CommunityServiceImplementation implements CommunityService {
 
     private void ensureOwner(User user, Community community) {
         if (!isOwner(community, user)) {
-            throw new SecurityException(COMMUNITY_DELETE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(COMMUNITY_DELETE_FORBIDDEN_MESSAGE);
         }
     }
 
@@ -804,7 +831,7 @@ public class CommunityServiceImplementation implements CommunityService {
     void ensureAdminMembership(CommunityMembership membership) {
         boolean isAdmin = membership != null && membership.role == CommunityMemberRole.ADMIN;
         if (!isAdmin) {
-            throw new SecurityException(COMMUNITY_UPDATE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(COMMUNITY_UPDATE_FORBIDDEN_MESSAGE);
         }
     }
 
@@ -836,20 +863,20 @@ public class CommunityServiceImplementation implements CommunityService {
     ) {
         User targetUser = getMembershipUser(targetMembership);
         if (actor == null || actor.id == null || targetUser == null || targetUser.id == null) {
-            throw new SecurityException(COMMUNITY_ROLE_UPDATE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(COMMUNITY_ROLE_UPDATE_FORBIDDEN_MESSAGE);
         }
         if (actor.id.equals(targetUser.id)) {
-            throw new SecurityException(COMMUNITY_SELF_ROLE_UPDATE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(COMMUNITY_SELF_ROLE_UPDATE_FORBIDDEN_MESSAGE);
         }
         if (!isElevated(actorMembership)) {
-            throw new SecurityException(COMMUNITY_ROLE_UPDATE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(COMMUNITY_ROLE_UPDATE_FORBIDDEN_MESSAGE);
         }
         if (isOwner(community, targetUser)) {
-            throw new SecurityException(COMMUNITY_OWNER_ROLE_UPDATE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(COMMUNITY_OWNER_ROLE_UPDATE_FORBIDDEN_MESSAGE);
         }
         if (actorMembership.role == CommunityMemberRole.MODERATOR
                 && (targetMembership.role == CommunityMemberRole.ADMIN || desiredRole == CommunityMemberRole.ADMIN)) {
-            throw new SecurityException(COMMUNITY_ROLE_UPDATE_FORBIDDEN_MESSAGE);
+            throw new ForbiddenException(COMMUNITY_ROLE_UPDATE_FORBIDDEN_MESSAGE);
         }
     }
 

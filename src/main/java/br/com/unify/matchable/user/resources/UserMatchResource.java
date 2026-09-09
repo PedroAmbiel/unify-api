@@ -3,11 +3,10 @@ package br.com.unify.matchable.user.resources;
 import java.util.UUID;
 import java.util.NoSuchElementException;
 
-import org.eclipse.microprofile.jwt.JsonWebToken;
-
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
 import br.com.unify.matchable.common.image.ImageResponses;
+import br.com.unify.matchable.common.resources.AuthenticatedResource;
 import br.com.unify.matchable.user.dto.MatchDecisionRequest;
 import br.com.unify.matchable.user.dto.PotentialMatchesRequest;
 import br.com.unify.matchable.user.entity.User;
@@ -27,14 +26,18 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Request;
 import jakarta.ws.rs.core.Response;
 
+/**
+ * NOTA: os try/catch de NoSuchElementException/IllegalStateException abaixo
+ * são redundantes com {@code GlobalExceptionMapper} para uma requisição HTTP
+ * real, mas foram mantidos porque UserMatchResourceTest chama os métodos
+ * deste resource diretamente em Java (TestableUserMatchResource), sem passar
+ * pelo pipeline de exception mappers do JAX-RS.
+ */
 @Path("/users/me/matches")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("user")
-public class UserMatchResource {
-
-    @Inject
-    JsonWebToken jwt;
+public class UserMatchResource extends AuthenticatedResource {
 
     @Inject
     UserMatchService userMatchService;
@@ -119,16 +122,6 @@ public class UserMatchResource {
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }
-    }
-
-    protected User findCurrentUser() {
-        return User.findById(UUID.fromString(jwt.getSubject()));
-    }
-
-    private Response userNotFoundResponse() {
-        return Response.status(Response.Status.NOT_FOUND)
-                .entity(ErrorResponse.of(ErrorCode.USER_NOT_FOUND))
-                .build();
     }
 
     private Response validationErrorResponse(String details) {

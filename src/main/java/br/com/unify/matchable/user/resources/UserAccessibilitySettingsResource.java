@@ -1,11 +1,8 @@
 package br.com.unify.matchable.user.resources;
 
-import java.util.UUID;
-
-import org.eclipse.microprofile.jwt.JsonWebToken;
-
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
+import br.com.unify.matchable.common.resources.AuthenticatedResource;
 import br.com.unify.matchable.user.dto.UserAccessibilitySettingsUpsertRequest;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.services.UserAccessibilitySettingsService;
@@ -24,10 +21,7 @@ import jakarta.ws.rs.core.Response;
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("user")
-public class UserAccessibilitySettingsResource {
-
-    @Inject
-    JsonWebToken jwt;
+public class UserAccessibilitySettingsResource extends AuthenticatedResource {
 
     @Inject
     UserAccessibilitySettingsService userAccessibilitySettingsService;
@@ -55,16 +49,6 @@ public class UserAccessibilitySettingsResource {
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         }
-    }
-
-    protected User findCurrentUser() {
-        return User.findById(UUID.fromString(jwt.getSubject()));
-    }
-
-    private Response userNotFoundResponse() {
-        return Response.status(Response.Status.NOT_FOUND)
-                .entity(ErrorResponse.of(ErrorCode.USER_NOT_FOUND))
-                .build();
     }
 
     private Response validationErrorResponse(String details) {

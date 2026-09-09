@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: unify
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: unify
+      DB_USER: admin
+      DB_PASSWORD: admin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Generate JWT RSA keys
+        run: |
+          mkdir -p secrets
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out secrets/privateKey.pem
+          openssl rsa -pubout -in secrets/privateKey.pem -out secrets/publicKey.pem
+
+      - name: Run tests
+        run: >-
+          ./mvnw -B test
+          -Dquarkus.flyway.migrate-at-start=true
+          -Dquarkus.flyway.clean-at-start=true
+          -Dquarkus.flyway.baseline-on-migrate=false
+          -Dquarkus.hibernate-orm.database.generation=validate

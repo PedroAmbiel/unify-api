@@ -6,12 +6,15 @@ import io.vertx.core.http.HttpServerRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
+import jakarta.ws.rs.container.ResourceInfo;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+
+import java.lang.reflect.Method;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -47,8 +50,14 @@ public class RateLimitFilter implements ContainerRequestFilter {
     @ConfigProperty(name = "unify.rate-limit.window-seconds", defaultValue = "60")
     long windowSeconds;
 
+    @ConfigProperty(name = "quarkus.http.proxy.proxy-address-forwarding", defaultValue = "false")
+    boolean proxyAddressForwardingEnabled;
+
     @Context
     HttpServerRequest httpServerRequest;
+
+    @Context
+    ResourceInfo resourceInfo;
 
     private final Map<String, Deque<Instant>> buckets = new ConcurrentHashMap<>();
 
@@ -58,9 +67,21 @@ public class RateLimitFilter implements ContainerRequestFilter {
             return;
         }
 
+        int effectiveMaxRequests = maxRequests;
+        long effectiveWindowSeconds = windowSeconds;
+        RateLimited annotation = resolveAnnotation();
+        if (annotation != null) {
+            if (annotation.limit() > 0) {
+                effectiveMaxRequests = annotation.limit();
+            }
+            if (annotation.windowSeconds() > 0) {
+                effectiveWindowSeconds = annotation.windowSeconds();
+            }
+        }
+
         String key = resolveClientIp() + "|" + requestContext.getUriInfo().getPath();
         Instant now = Instant.now();
-        Instant windowStart = now.minus(Duration.ofSeconds(windowSeconds));
+        Instant windowStart = now.minus(Duration.ofSeconds(effectiveWindowSeconds));
 
         // Guarda simples contra crescimento ilimitado do mapa.
         if (buckets.size() > MAX_TRACKED_KEYS) {
@@ -79,10 +100,10 @@ public class RateLimitFilter implements ContainerRequestFilter {
                 hits.pollFirst();
             }
 
-            if (hits.size() >= maxRequests) {
-                long retryAfter = Duration.between(hits.peekFirst(), windowStart.plusSeconds(windowSeconds))
+            if (hits.size() >= effectiveMaxRequests) {
+                long retryAfter = Duration.between(hits.peekFirst(), windowStart.plusSeconds(effectiveWindowSeconds))
                         .getSeconds();
-                LOG.warnf("Rate limit atingido para %s (%d req / %ds)", key, hits.size(), windowSeconds);
+                LOG.warnf("Rate limit atingido para %s (%d req / %ds)", key, hits.size(), effectiveWindowSeconds);
 
                 requestContext.abortWith(
                         Response.status(429)
@@ -100,12 +121,36 @@ public class RateLimitFilter implements ContainerRequestFilter {
     }
 
     /**
-     * Resolve o IP do cliente. X-Forwarded-For so e confiavel atras de um
-     * proxy controlado - configure `quarkus.http.proxy.proxy-address-forwarding`
-     * antes de depender dele em producao.
+     * Resolve a anotacao {@link RateLimited} efetiva do endpoint invocado,
+     * priorizando a do metodo sobre a da classe (mesma precedencia do JAX-RS
+     * para outras anotacoes de metodo/classe).
+     */
+    private RateLimited resolveAnnotation() {
+        if (resourceInfo == null) {
+            return null;
+        }
+        Method method = resourceInfo.getResourceMethod();
+        if (method != null && method.isAnnotationPresent(RateLimited.class)) {
+            return method.getAnnotation(RateLimited.class);
+        }
+        Class<?> resourceClass = resourceInfo.getResourceClass();
+        if (resourceClass != null && resourceClass.isAnnotationPresent(RateLimited.class)) {
+            return resourceClass.getAnnotation(RateLimited.class);
+        }
+        return null;
+    }
+
+    /**
+     * Resolve o IP do cliente. X-Forwarded-For so e honrado quando a aplicacao
+     * esta configurada para confiar em um proxy reverso
+     * (`quarkus.http.proxy.proxy-address-forwarding=true`); caso contrario o
+     * header e ignorado (poderia ser forjado pelo cliente) e usamos o IP
+     * remoto real da conexao.
      */
     private String resolveClientIp() {
-        String forwardedFor = httpServerRequest.getHeader("X-Forwarded-For");
+        String forwardedFor = proxyAddressForwardingEnabled
+                ? httpServerRequest.getHeader("X-Forwarded-For")
+                : null;
         if (forwardedFor != null && !forwardedFor.isBlank()) {
             int comma = forwardedFor.indexOf(',');
             return (comma > 0 ? forwardedFor.substring(0, comma) : forwardedFor).trim();

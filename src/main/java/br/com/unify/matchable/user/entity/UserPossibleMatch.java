@@ -74,12 +74,13 @@ public class UserPossibleMatch extends PanacheEntityBase {
         return find("starterProfile = ?1 and pendingProfile = ?2", starterProfile, pendingProfile).firstResult();
     }
 
+    /** Convites recebidos ainda sem resposta — recusas (declinedAt) ficam de fora. */
     public static List<UserPossibleMatch> listInboundPending(UserProfile pendingProfile) {
-        return list("pendingProfile = ?1 and pendingAccepted is null order by createdAt desc", pendingProfile);
+        return list("pendingProfile = ?1 and pendingAccepted is null and declinedAt is null order by createdAt desc", pendingProfile);
     }
 
     public static List<UserPossibleMatch> listOutboundPending(UserProfile starterProfile) {
-        return list("starterProfile = ?1 and pendingAccepted is null order by createdAt desc", starterProfile);
+        return list("starterProfile = ?1 and pendingAccepted is null and declinedAt is null order by createdAt desc", starterProfile);
     }
 
     public static PanacheQuery<UserPossibleMatch> findConfirmedForProfile(UserProfile profile) {

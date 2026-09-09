@@ -12,10 +12,13 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.NoSuchElementException;
+import java.util.function.BiFunction;
 import java.util.function.ToLongFunction;
 
 import org.junit.jupiter.api.Test;
 
+import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.community.dto.CommunityMemberHeaderResponse;
 import br.com.unify.matchable.community.entity.Community;
 import br.com.unify.matchable.community.entity.CommunityMembership;
@@ -45,8 +48,65 @@ class CommunityServiceImplementationTest {
                 )
         );
 
-        assertInstanceOf(SecurityException.class, exception.getCause());
+        assertInstanceOf(ForbiddenException.class, exception.getCause());
         assertEquals("Você não tem permissão para alterar o nível deste membro", exception.getCause().getMessage());
+    }
+
+    @Test
+    void privateCommunityIsNotReadableByNonMember() {
+        CommunityServiceImplementation service = new CommunityServiceImplementation();
+        Community community = buildCommunity();
+        community.privacy = CommunityPrivacy.PRIVATE;
+        User outsider = buildUser();
+
+        NoSuchElementException exception = assertThrows(
+                NoSuchElementException.class,
+                () -> service.requireReadableCommunity(community, outsider, noMembership())
+        );
+
+        // 404 (RESOURCE_NOT_FOUND) e nao 403: nao vazamos a existencia da comunidade privada.
+        assertEquals("Comunidade não encontrada", exception.getMessage());
+    }
+
+    @Test
+    void privateCommunityIsReadableByActiveMember() {
+        CommunityServiceImplementation service = new CommunityServiceImplementation();
+        Community community = buildCommunity();
+        community.privacy = CommunityPrivacy.PRIVATE;
+        User member = buildUser();
+        CommunityMembership membership = buildMembership(community, member, CommunityMemberRole.MEMBER);
+
+        assertDoesNotThrow(() -> service.requireReadableCommunity(
+                community, member, membershipOf(member, membership)));
+    }
+
+    @Test
+    void publicCommunityIsReadableByNonMember() {
+        CommunityServiceImplementation service = new CommunityServiceImplementation();
+        Community community = buildCommunity();
+        community.privacy = CommunityPrivacy.PUBLIC;
+
+        assertDoesNotThrow(() -> service.requireReadableCommunity(community, buildUser(), noMembership()));
+    }
+
+    @Test
+    void privateCommunityIsNotReadableByAnonymousUser() {
+        CommunityServiceImplementation service = new CommunityServiceImplementation();
+        Community community = buildCommunity();
+        community.privacy = CommunityPrivacy.PRIVATE;
+
+        assertThrows(
+                NoSuchElementException.class,
+                () -> service.requireReadableCommunity(community, null, noMembership())
+        );
+    }
+
+    private BiFunction<Community, User, CommunityMembership> noMembership() {
+        return (community, user) -> null;
+    }
+
+    private BiFunction<Community, User, CommunityMembership> membershipOf(User member, CommunityMembership membership) {
+        return (community, user) -> user == member ? membership : null;
     }
 
     @Test
@@ -115,7 +175,7 @@ class CommunityServiceImplementationTest {
                 )
         );
 
-        assertInstanceOf(SecurityException.class, exception.getCause());
+        assertInstanceOf(ForbiddenException.class, exception.getCause());
         assertEquals("Não é possível alterar o nível do proprietário da comunidade", exception.getCause().getMessage());
     }
 
@@ -190,19 +250,19 @@ class CommunityServiceImplementationTest {
                 buildMembership(community, buildUser(), CommunityMemberRole.ADMIN)
         ));
 
-        SecurityException memberException = assertThrows(
-                SecurityException.class,
+        ForbiddenException memberException = assertThrows(
+                ForbiddenException.class,
                 () -> service.ensureAdminMembership(buildMembership(community, buildUser(), CommunityMemberRole.MEMBER))
         );
         assertEquals("Apenas administradores da comunidade podem editar os dados dela", memberException.getMessage());
 
-        SecurityException moderatorException = assertThrows(
-                SecurityException.class,
+        ForbiddenException moderatorException = assertThrows(
+                ForbiddenException.class,
                 () -> service.ensureAdminMembership(buildMembership(community, buildUser(), CommunityMemberRole.MODERATOR))
         );
         assertEquals("Apenas administradores da comunidade podem editar os dados dela", moderatorException.getMessage());
 
-        assertThrows(SecurityException.class, () -> service.ensureAdminMembership(null));
+        assertThrows(ForbiddenException.class, () -> service.ensureAdminMembership(null));
     }
 
     @Test

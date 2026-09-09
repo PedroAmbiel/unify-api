@@ -7,7 +7,6 @@ import java.time.format.DateTimeParseException;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
-import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 
@@ -17,6 +16,8 @@ import br.com.unify.matchable.chat.services.ChatMediaValidator;
 import br.com.unify.matchable.chat.services.ChatService;
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
+import br.com.unify.matchable.common.exceptions.ForbiddenException;
+import br.com.unify.matchable.common.resources.AuthenticatedResource;
 import br.com.unify.matchable.user.entity.User;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
@@ -33,14 +34,22 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+/**
+ * NOTA sobre os try/catch de NoSuchElementException / IllegalStateException /
+ * ForbiddenException mantidos em cada método: embora
+ * {@code GlobalExceptionMapper} já produza a MESMA resposta (status + code)
+ * para esses tipos em produção (via HTTP), os testes de unidade deste
+ * resource (ChatResourceTest) chamam os métodos diretamente em Java,
+ * contornando a cadeia de providers do JAX-RS — logo o mapper nunca roda
+ * nesses testes. Remover os catches locais faria a exceção "crua" propagar
+ * no teste em vez de virar um {@code Response}, quebrando a suíte. Por isso
+ * eles foram mantidos (ver relatório da tarefa).
+ */
 @Path("/chats")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("user")
-public class ChatResource {
-
-    @Inject
-    JsonWebToken jwt;
+public class ChatResource extends AuthenticatedResource {
 
     @Inject
     ChatService chatService;
@@ -79,7 +88,7 @@ public class ChatResource {
             return Response.ok(chatService.openConversation(user, matchId)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
             return conflictResponse(exception.getMessage());
@@ -109,7 +118,7 @@ public class ChatResource {
             ).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -136,7 +145,7 @@ public class ChatResource {
                     .build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -174,7 +183,7 @@ public class ChatResource {
                     .build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -201,7 +210,7 @@ public class ChatResource {
                     .build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
             return conflictResponse(exception.getMessage());
@@ -228,7 +237,7 @@ public class ChatResource {
             return Response.ok(chatService.deleteMessage(user, conversationId, messageId)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -279,7 +288,7 @@ public class ChatResource {
             return Response.ok(chatService.markConversationAsRead(user, conversationId)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -287,10 +296,6 @@ public class ChatResource {
     }
 
     // ---- apoio ----------------------------------------------------------
-
-    protected User findCurrentUser() {
-        return User.findById(UUID.fromString(jwt.getSubject()));
-    }
 
     protected Instant parseInstant(String value) {
         if (value == null || value.isBlank()) {
@@ -318,7 +323,17 @@ public class ChatResource {
         }
     }
 
-    private Response userNotFoundResponse() {
+    /**
+     * Sobrescreve a versão base de {@link AuthenticatedResource} para manter
+     * o {@code Content-Type} JSON explícito: o endpoint
+     * {@code getMessageMedia} declara
+     * {@code @Produces(APPLICATION_OCTET_STREAM)}, e sem esse {@code type()}
+     * explícito a negociação de conteúdo do JAX-RS herdaria octet-stream
+     * também para a resposta de erro. Status e código do corpo continuam
+     * byte-idênticos ao contrato herdado ({@link AuthenticatedResource}).
+     */
+    @Override
+    protected Response userNotFoundResponse() {
         return errorResponse(Response.Status.NOT_FOUND, ErrorResponse.of(ErrorCode.USER_NOT_FOUND));
     }
 

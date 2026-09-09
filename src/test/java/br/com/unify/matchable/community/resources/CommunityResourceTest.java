@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 
 import br.com.unify.matchable.common.dto.ErrorResponse;
+import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.common.dto.PageResponse;
 import br.com.unify.matchable.community.dto.CommunityAuthorResponse;
 import br.com.unify.matchable.community.dto.CommunityCategoryResponse;
@@ -219,7 +220,7 @@ class CommunityResourceTest {
     @Test
     void updateCommunityReturnsForbiddenWhenServiceRejectsNonAdmin() {
         StubCommunityService service = new StubCommunityService();
-        service.securityException = new SecurityException("Apenas administradores da comunidade podem editar os dados dela");
+        service.securityException = new ForbiddenException("Apenas administradores da comunidade podem editar os dados dela");
 
         TestableCommunityResource resource = new TestableCommunityResource();
         resource.communityService = service;
@@ -499,7 +500,7 @@ class CommunityResourceTest {
     @Test
     void updateMemberRoleReturnsForbiddenWhenServiceRejectsPermission() {
         StubCommunityService service = new StubCommunityService();
-        service.securityException = new SecurityException("Você não tem permissão para alterar o nível deste membro");
+        service.securityException = new ForbiddenException("Você não tem permissão para alterar o nível deste membro");
 
         TestableCommunityResource resource = new TestableCommunityResource();
         resource.communityService = service;
@@ -719,7 +720,7 @@ class CommunityResourceTest {
         private IllegalArgumentException validationException;
         private IllegalStateException stateException;
         private NoSuchElementException notFoundException;
-        private SecurityException securityException;
+        private ForbiddenException securityException;
 
         @Override
         public List<CommunityCategoryResponse> listCategories() {
@@ -1092,7 +1093,7 @@ class CommunityResourceTest {
         }
 
         @Override
-        public byte[] getPostMedia(UUID postId) {
+        public byte[] getPostMedia(User user, UUID postId) {
             capturedPostId = postId;
             return mediaBytes;
         }

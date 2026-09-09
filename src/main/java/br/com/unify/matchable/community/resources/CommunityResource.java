@@ -5,14 +5,15 @@ import java.nio.file.Files;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
-import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
+import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.common.exceptions.PayloadTooLargeException;
 import br.com.unify.matchable.common.image.ImageResponses;
+import br.com.unify.matchable.common.resources.AuthenticatedResource;
 import br.com.unify.matchable.community.dto.CommunityCommentCreateRequest;
 import br.com.unify.matchable.community.dto.CommunityMemberRoleUpdateRequest;
 import br.com.unify.matchable.community.services.CommunityService;
@@ -34,14 +35,21 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Request;
 import jakarta.ws.rs.core.Response;
 
+/**
+ * NOTA: os try/catch de NoSuchElementException / IllegalStateException /
+ * ForbiddenException / PayloadTooLargeException mantidos abaixo já são
+ * redundantes com {@code GlobalExceptionMapper} do ponto de vista de uma
+ * requisição HTTP real. Foram mantidos porque CommunityResourceTest chama os
+ * métodos deste resource diretamente em Java (subclasse
+ * TestableCommunityResource), contornando o pipeline de exception mappers do
+ * JAX-RS — removê-los faria a exceção "crua" propagar no teste em vez de
+ * virar um {@code Response}, quebrando a suíte.
+ */
 @Path("/communities")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("user")
-public class CommunityResource {
-
-    @Inject
-    JsonWebToken jwt;
+public class CommunityResource extends AuthenticatedResource {
 
     @Inject
     CommunityService communityService;
@@ -191,7 +199,7 @@ public class CommunityResource {
             return payloadTooLargeResponse(exception.getMessage());
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -212,7 +220,7 @@ public class CommunityResource {
             return Response.noContent().build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -314,7 +322,7 @@ public class CommunityResource {
             return Response.ok(communityService.listJoinRequests(user, communityId, page, size)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -337,7 +345,7 @@ public class CommunityResource {
             return Response.ok(communityService.approveJoinRequest(user, communityId, requestId)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -361,7 +369,7 @@ public class CommunityResource {
             return Response.noContent().build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -414,7 +422,7 @@ public class CommunityResource {
             )).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -466,7 +474,7 @@ public class CommunityResource {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
             return conflictResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -508,7 +516,7 @@ public class CommunityResource {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
             return conflictResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -530,7 +538,7 @@ public class CommunityResource {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
             return conflictResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -598,7 +606,7 @@ public class CommunityResource {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
             return conflictResponse(exception.getMessage());
-        } catch (SecurityException exception) {
+        } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
@@ -633,7 +641,7 @@ public class CommunityResource {
         }
 
         try {
-            return ImageResponses.jpeg(communityService.getPostMedia(postId), request);
+            return ImageResponses.jpeg(communityService.getPostMedia(user, postId), request);
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }
@@ -656,10 +664,6 @@ public class CommunityResource {
         }
     }
 
-    protected User findCurrentUser() {
-        return User.findById(UUID.fromString(jwt.getSubject()));
-    }
-
     protected byte[] readOptionalUploadedBytes(FileUpload image) {
         if (image == null || image.uploadedFile() == null) {
             return null;
@@ -678,12 +682,6 @@ public class CommunityResource {
         } catch (IOException exception) {
             throw new IllegalArgumentException("Não foi possível ler a imagem enviada", exception);
         }
-    }
-
-    private Response userNotFoundResponse() {
-        return Response.status(Response.Status.NOT_FOUND)
-                .entity(ErrorResponse.of(ErrorCode.USER_NOT_FOUND))
-                .build();
     }
 
     private Response validationErrorResponse(String details) {

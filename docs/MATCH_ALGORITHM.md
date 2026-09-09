@@ -78,6 +78,26 @@ Leitura da regra:
 A lista `alreadyUsedProfileIds` enviada pelo cliente continua sendo filtrada **em memória** depois da
 consulta, porque é estado de sessão do aplicativo, não estado do servidor.
 
+### 2.2.1 Ponto único de exclusão
+
+Existem **três** queries de candidato (`executeCandidateQuery`, `executeNoLocationModeQuery`,
+`executeNoCoordinateCandidateQuery`) e **um quarto caminho** — os convites recebidos
+(`collectPriorityInboundProfileIds` → `insertPriorityMatches`) — que não passa por SQL nenhum. Uma regra
+de exclusão nova precisaria ser lembrada em quatro lugares; o caminho inbound era justamente o mais
+fácil de esquecer, e era o único que já não aplicava nenhuma exclusão.
+
+A regra passa a viver em **dois** métodos gêmeos de `UserMatchServiceImplementation`, ambos marcados com
+o comentário `// semana 04: UserBlock pluga aqui`:
+
+| Método | Forma | Consumidores |
+|---|---|---|
+| `commonCandidateFilters(desiredGenderIds, minAge, maxAge)` | fragmento SQL (`verified`, gênero, `ageClause`, `decisionExclusionClause`) | as 3 queries nativas |
+| `filterVisibleProfileIds(viewer, profileIds)` | uma query JPQL com a mesma semântica | caminho inbound (e chamadas pontuais) |
+
+`filterVisibleProfileIds` faz **uma** consulta, remove o próprio perfil do viewer e preserva a ordem de
+entrada. Um convite recebido ainda sem resposta continua visível; uma recusa em carência (em qualquer
+direção) some. Quando o `UserBlock` da semana 04 entrar, ele altera esses dois pontos — não quatro.
+
 ### 2.3 Bounding box + haversine
 
 O haversine (`acos/cos/sin`) roda apenas sobre os candidatos que sobrevivem a um pré-filtro de range,
@@ -306,15 +326,44 @@ convite recebido ──aceite──▶ pendingAccepted=true  ⇒ match mútuo
 recusa antiga (fora da carência) ──nova decisão──▶ registro sobrescrito, createdAt=agora
 ```
 
+`registerDecision` resolve o estado **por par**, não por direção: `UserPossibleMatch.findBetween`
+localiza a única linha do par e decide a transição.
+
+| Estado do par | Ação |
+|---|---|
+| não existe linha | cria `(current→target)` com `starterAccepted = decisão` |
+| `declinedAt != null` e **dentro** da carência | **409** — "Este perfil não está disponível no momento." |
+| `declinedAt != null` e carência **expirada** | reutiliza a linha, invertendo a direção: `starter = quem decide agora`, `starterAccepted = decisão`, `pendingAccepted = null`, `declinedAt = null` (ou `agora`, se recusa) |
+| `declinedAt is null` e current é o `pending` sem resposta | responde ao convite (`pendingAccepted`); ambos `true` ⇒ match confirmado |
+| `declinedAt is null` e current é o `pending` já respondido | 409 "Este match já foi respondido" |
+| `declinedAt is null` e current é o `starter` | 409 "Você já registrou uma decisão para este perfil" |
+
+- **Bug corrigido:** o ramo de convite olhava apenas `pendingAccepted != null`. Curtir de volta quem
+  havia recusado gravava `pendingAccepted=true` sobre `starterAccepted=false` — um **par morto**, que
+  nunca vira match e nunca mais volta ao feed.
+- **Nunca `delete`.** `V9__chat_conversations_and_messages.sql:17` declara
+  `on delete cascade` de `conversations` para `user_possible_matches`: apagar a linha do match apagaria a
+  conversa junto. Toda transição é mutação da linha existente.
+- **Código de erro:** o 409 de carência reusa o `RESOURCE_CONFLICT` genérico, porque
+  `UserMatchResource.registerDecision` mapeia toda `IllegalStateException` para `conflictResponse(...)`.
+  Um `MATCH_NOT_AVAILABLE` específico exigiria um tipo de exceção próprio; a mensagem de detalhe já
+  distingue o caso para o cliente.
+
 - **A recusa de um perfil novo passa a ser persistida.** Antes, `registerDecision` lançava
   `IllegalArgumentException` ("Não existe um match pendente deste perfil para registrar uma recusa") e a
   recusa vivia apenas no `AsyncStorage` do aplicativo: trocar de aparelho ou limpar dados trazia todos os
   perfis recusados de volta.
 - **Carência:** `unify.match.decline-cooldown-days` (default 30). Durante a carência o perfil não aparece
   no discovery; depois dela volta com a penalidade de 10 pontos.
-- **Limpeza:** `UserMatchCleanupService` roda a cada 24 h e apaga **apenas** recusas com
-  `declined_at < agora − carência`. A versão anterior deletava toda linha `pendingAccepted = false` a cada
-  10 h, o que fazia qualquer perfil recusado voltar ao feed em no máximo 10 horas.
+- **Retenção (separada da carência):** `unify.match.decline-retention-days` (default 180).
+  `UserMatchCleanupService` roda a cada 24 h e apaga **apenas** recusas com
+  `declined_at < agora − retenção`. A retenção é deliberadamente maior que a carência: fora da carência
+  o perfil volta ao feed **penalizado**, e a penalidade só existe enquanto a linha existir — apagar pela
+  carência anulava o reshow penalizado e devolvia o perfil como se nunca tivesse sido recusado.
+  A versão anterior deletava toda linha `pendingAccepted = false` a cada 10 h, o que fazia qualquer
+  perfil recusado voltar ao feed em no máximo 10 horas.
+- **Convites recebidos:** `listInboundPending` ignora linhas com `declined_at` preenchido — quem recusou
+  o usuário não aparece como convite pendente para ele.
 - Decidir duas vezes o mesmo perfil (sem recusa expirada no meio) devolve 409
   ("Você já registrou uma decisão para este perfil").
 
