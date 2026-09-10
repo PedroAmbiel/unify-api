@@ -412,6 +412,10 @@ public class UserProfileServiceImplementation implements UserProfileService {
         UserProfileImage currentProfilePicture = UserProfileImage.findActiveProfilePicture(profile);
         if (currentProfilePicture != null) {
             currentProfilePicture.active = false;
+            // O Hibernate executa INSERTs antes de UPDATEs no flush. Sem este flush
+            // a nova foto entra enquanto a antiga ainda esta ativa e o indice parcial
+            // uq_user_profile_images_active_profile_pic rejeita a troca.
+            entityManager.flush();
         }
     }
 
