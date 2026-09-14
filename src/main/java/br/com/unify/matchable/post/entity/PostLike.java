@@ -1,4 +1,4 @@
-package br.com.unify.matchable.community.entity;
+package br.com.unify.matchable.post.entity;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -17,31 +17,31 @@ import jakarta.persistence.UniqueConstraint;
 
 @Entity
 @Table(
-        name = "community_post_likes",
-        uniqueConstraints = @UniqueConstraint(name = "uq_community_post_like_post_user", columnNames = { "fk_post", "fk_user" })
+        name = "post_likes",
+        uniqueConstraints = @UniqueConstraint(name = "uq_post_likes_post_user", columnNames = { "fk_post", "fk_user" })
 )
-public class CommunityPostLike extends PanacheEntityBase {
+public class PostLike extends PanacheEntityBase {
 
     @Id
     @Column(name = "id", updatable = false, nullable = false)
     public UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_post", nullable = false, foreignKey = @ForeignKey(name = "fk_community_post_likes_post"))
-    public CommunityPost post;
+    @JoinColumn(name = "fk_post", nullable = false, foreignKey = @ForeignKey(name = "fk_post_likes_post"))
+    public Post post;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fk_user", nullable = false, foreignKey = @ForeignKey(name = "fk_community_post_likes_user"))
+    @JoinColumn(name = "fk_user", nullable = false, foreignKey = @ForeignKey(name = "fk_post_likes_user"))
     public User user;
 
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;
 
-    public static CommunityPostLike findByPostAndUser(CommunityPost post, User user) {
+    public static PostLike findByPostAndUser(Post post, User user) {
         return find("post = ?1 and user = ?2", post, user).firstResult();
     }
 
-    public static long countByPost(CommunityPost post) {
+    public static long countByPost(Post post) {
         return count("post", post);
     }
 }

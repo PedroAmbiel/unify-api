@@ -19,14 +19,14 @@ create index if not exists idx_user_profile_images_active_gallery
     on user_profile_images (fk_user_profile, id desc)
     where active = true and is_profile_pic = false;
 
-create index if not exists idx_community_posts_feed
-    on community_posts (fk_community, created_at desc, id desc);
+create index if not exists idx_posts_feed
+    on posts (fk_community, created_at desc, id desc);
 
-create index if not exists idx_community_post_comments_post
-    on community_post_comments (fk_post, created_at asc, id asc);
+create index if not exists idx_post_comments_post
+    on post_comments (fk_post, created_at asc, id asc);
 
-create index if not exists idx_community_post_likes_post
-    on community_post_likes (fk_post);
+create index if not exists idx_post_likes_post
+    on post_likes (fk_post);
 
 create index if not exists idx_community_memberships_community
     on community_memberships (fk_community);
@@ -39,6 +39,20 @@ create index if not exists idx_communities_owner
 
 create index if not exists idx_community_memberships_role
     on community_memberships (fk_community, role);
+
+-- Semana 03 (espelha V12/V13): unicidade parcial de denúncia ABERTA por alvo
+-- e índice do feed pessoal. Hibernate não gera índices parciais.
+create unique index if not exists ux_user_reports_open_unique
+    on user_reports (
+        fk_reporter,
+        fk_reported_user,
+        coalesce(fk_reported_post, '00000000-0000-0000-0000-000000000000'::uuid)
+    )
+    where status = 'OPEN';
+
+create index if not exists ix_posts_personal_author_created
+    on posts (fk_user, created_at desc, id desc)
+    where origin = 'PERSONAL' and active = true;
 
 insert into genders(id, description)
 values (1, 'Mulher'),

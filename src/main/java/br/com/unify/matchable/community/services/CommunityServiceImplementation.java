@@ -31,9 +31,9 @@ import br.com.unify.matchable.community.entity.Community;
 import br.com.unify.matchable.community.entity.CommunityCategory;
 import br.com.unify.matchable.community.entity.CommunityJoinRequest;
 import br.com.unify.matchable.community.entity.CommunityMembership;
-import br.com.unify.matchable.community.entity.CommunityPost;
-import br.com.unify.matchable.community.entity.CommunityPostComment;
-import br.com.unify.matchable.community.entity.CommunityPostLike;
+import br.com.unify.matchable.post.entity.Post;
+import br.com.unify.matchable.post.entity.PostComment;
+import br.com.unify.matchable.post.entity.PostLike;
 import br.com.unify.matchable.community.enums.CommunityMemberRole;
 import br.com.unify.matchable.community.enums.CommunityPrivacy;
 import br.com.unify.matchable.user.entity.User;
@@ -267,7 +267,7 @@ public class CommunityServiceImplementation implements CommunityService {
         }
         requireReadableCommunity(community, user);
 
-        PanacheQuery<CommunityPost> query = CommunityPost.queryByCommunity(community);
+        PanacheQuery<Post> query = Post.queryByCommunity(community);
         long totalElements = query.count();
         List<CommunityPostResponse> posts = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
                 .map(post -> toPostResponse(post, user))
@@ -353,8 +353,8 @@ public class CommunityServiceImplementation implements CommunityService {
         java.util.Map<UUID, Long> engagementByCommunity = new java.util.HashMap<>();
         for (Community community : matches) {
             long members = CommunityMembership.countByCommunity(community);
-            long posts = CommunityPost.count("community", community);
-            long likes = CommunityPostLike.count("post.community", community);
+            long posts = Post.count("community", community);
+            long likes = PostLike.count("post.community", community);
             engagementByCommunity.put(community.id, members * 3 + posts * 2 + likes);
         }
 
@@ -377,7 +377,7 @@ public class CommunityServiceImplementation implements CommunityService {
         int resolvedPage = validatePage(page);
         int resolvedSize = validateSize(size);
 
-        PanacheQuery<CommunityPost> query = CommunityPost.find(
+        PanacheQuery<Post> query = Post.find(
                 "community.active = true and community in "
                         + "(select membership.community from CommunityMembership membership where membership.userProfile.user = ?1) "
                         + "order by createdAt desc, id desc",
@@ -542,7 +542,7 @@ public class CommunityServiceImplementation implements CommunityService {
     public CommunityPostResponse createPost(User user, UUID communityId, String body, byte[] imageBytes) {
         Community community = requireMembership(communityId, user);
 
-        CommunityPost post = new CommunityPost();
+        Post post = new Post();
         post.id = UUIDv7Generator.generate();
         post.community = community;
         post.author = user;
@@ -559,26 +559,26 @@ public class CommunityServiceImplementation implements CommunityService {
     @Override
     @Transactional
     public void deletePost(User user, UUID postId) {
-        CommunityPost post = requirePost(postId);
+        Post post = requirePost(postId);
         CommunityMembership actorMembership = requireMembership(post.community, user);
         if (!isContentOwner(user, post.author) && !isElevated(actorMembership)) {
             throw new ForbiddenException(POST_DELETE_FORBIDDEN_MESSAGE);
         }
 
-        CommunityPostLike.delete("post", post);
-        CommunityPostComment.delete("post", post);
+        PostLike.delete("post", post);
+        PostComment.delete("post", post);
         post.delete();
     }
 
     @Override
     @Transactional
     public CommunityLikeResponse likePost(User user, UUID postId) {
-        CommunityPost post = requirePost(postId);
+        Post post = requirePost(postId);
         requireMembership(post.community, user);
 
-        CommunityPostLike existingLike = CommunityPostLike.findByPostAndUser(post, user);
+        PostLike existingLike = PostLike.findByPostAndUser(post, user);
         if (existingLike == null) {
-            CommunityPostLike like = new CommunityPostLike();
+            PostLike like = new PostLike();
             like.id = UUIDv7Generator.generate();
             like.post = post;
             like.user = user;
@@ -586,7 +586,7 @@ public class CommunityServiceImplementation implements CommunityService {
             like.persist();
         }
 
-        return new CommunityLikeResponse(post.id, CommunityPostLike.countByPost(post), true);
+        return new CommunityLikeResponse(post.id, PostLike.countByPost(post), true);
     }
 
     @Override
@@ -598,7 +598,7 @@ public class CommunityServiceImplementation implements CommunityService {
     @Override
     @Transactional
     public CommunityLikeResponse deleteLike(User user, UUID postId, UUID targetUserId) {
-        CommunityPost post = requirePost(postId);
+        Post post = requirePost(postId);
         CommunityMembership actorMembership = requireMembership(post.community, user);
 
         if (targetUserId == null) {
@@ -610,7 +610,7 @@ public class CommunityServiceImplementation implements CommunityService {
             throw new NoSuchElementException(LIKE_NOT_FOUND_MESSAGE);
         }
 
-        CommunityPostLike like = CommunityPostLike.findByPostAndUser(post, targetUser);
+        PostLike like = PostLike.findByPostAndUser(post, targetUser);
         if (like == null) {
             throw new NoSuchElementException(LIKE_NOT_FOUND_MESSAGE);
         }
@@ -622,8 +622,8 @@ public class CommunityServiceImplementation implements CommunityService {
         like.delete();
         return new CommunityLikeResponse(
                 post.id,
-                CommunityPostLike.countByPost(post),
-                CommunityPostLike.findByPostAndUser(post, user) != null
+                PostLike.countByPost(post),
+                PostLike.findByPostAndUser(post, user) != null
         );
     }
 
@@ -632,9 +632,9 @@ public class CommunityServiceImplementation implements CommunityService {
         int resolvedPage = validatePage(page);
         int resolvedSize = validateSize(size);
 
-        CommunityPost post = requirePost(postId);
+        Post post = requirePost(postId);
         requireReadableCommunity(post.community, user);
-        PanacheQuery<CommunityPostComment> query = CommunityPostComment.queryByPost(post);
+        PanacheQuery<PostComment> query = PostComment.queryByPost(post);
         long totalElements = query.count();
         List<CommunityCommentResponse> comments = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
                 .map(comment -> toCommentResponse(comment, user))
@@ -646,10 +646,10 @@ public class CommunityServiceImplementation implements CommunityService {
     @Override
     @Transactional
     public CommunityCommentResponse createComment(User user, UUID postId, String body) {
-        CommunityPost post = requirePost(postId);
+        Post post = requirePost(postId);
         requireMembership(post.community, user);
 
-        CommunityPostComment comment = new CommunityPostComment();
+        PostComment comment = new PostComment();
         comment.id = UUIDv7Generator.generate();
         comment.post = post;
         comment.author = user;
@@ -663,14 +663,14 @@ public class CommunityServiceImplementation implements CommunityService {
     @Override
     @Transactional
     public void deleteComment(User user, UUID postId, UUID commentId) {
-        CommunityPost post = requirePost(postId);
+        Post post = requirePost(postId);
         CommunityMembership actorMembership = requireMembership(post.community, user);
 
         if (commentId == null) {
             throw new IllegalArgumentException("Informe o identificador do comentário");
         }
 
-        CommunityPostComment comment = CommunityPostComment.findByIdAndPost(commentId, post);
+        PostComment comment = PostComment.findByIdAndPost(commentId, post);
         if (comment == null) {
             throw new NoSuchElementException(COMMENT_NOT_FOUND_MESSAGE);
         }
@@ -694,7 +694,7 @@ public class CommunityServiceImplementation implements CommunityService {
 
     @Override
     public byte[] getPostMedia(User user, UUID postId) {
-        CommunityPost post = requirePost(postId);
+        Post post = requirePost(postId);
         requireReadableCommunity(post.community, user);
         if (post.mediaOid == null) {
             throw new NoSuchElementException(POST_MEDIA_NOT_FOUND_MESSAGE);
@@ -801,12 +801,12 @@ public class CommunityServiceImplementation implements CommunityService {
         return UserProfile.findByUser(user);
     }
 
-    private CommunityPost requirePost(UUID postId) {
+    private Post requirePost(UUID postId) {
         if (postId == null) {
             throw new IllegalArgumentException("Informe o identificador da publicação");
         }
 
-        CommunityPost post = CommunityPost.findByIdWithActiveCommunity(postId);
+        Post post = Post.findByIdWithActiveCommunity(postId);
         if (post == null) {
             throw new NoSuchElementException(POST_NOT_FOUND_MESSAGE);
         }
@@ -959,21 +959,21 @@ public class CommunityServiceImplementation implements CommunityService {
         );
     }
 
-    private CommunityPostResponse toPostResponse(CommunityPost post, User currentUser) {
+    private CommunityPostResponse toPostResponse(Post post, User currentUser) {
         return new CommunityPostResponse(
                 post.id,
                 toAuthorResponse(post.author),
                 formatPublishedAt(post.createdAt),
                 post.body,
                 post.mediaOid == null ? null : POST_MEDIA_URL_PREFIX + post.id + POST_MEDIA_URL_SUFFIX,
-                CommunityPostLike.countByPost(post),
-                CommunityPostComment.countByPost(post),
-                currentUser != null && CommunityPostLike.findByPostAndUser(post, currentUser) != null,
-                currentUser != null && CommunityPostComment.existsByPostAndUser(post, currentUser)
+                PostLike.countByPost(post),
+                PostComment.countByPost(post),
+                currentUser != null && PostLike.findByPostAndUser(post, currentUser) != null,
+                currentUser != null && PostComment.existsByPostAndUser(post, currentUser)
         );
     }
 
-    private CommunityCommentResponse toCommentResponse(CommunityPostComment comment, User currentUser) {
+    private CommunityCommentResponse toCommentResponse(PostComment comment, User currentUser) {
         boolean commentedByCurrentUser = currentUser != null
                 && currentUser.id != null
                 && comment.author != null
