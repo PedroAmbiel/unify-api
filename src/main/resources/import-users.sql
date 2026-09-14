@@ -28,7 +28,9 @@ select
     ('seed.user' || lpad(gs.i::text, 2, '0') || '@unify.dev') as email,
     ('5511998' || lpad(gs.i::text, 6, '0')) as cellphone,
     (date '1984-01-01' + ((gs.i - 1) * interval '120 days'))::date as birthdate,
-    (gs.i % 2 = 0) as verified,
+    -- Todos verificados: perfil publico (GET /users/{id}/public-profile) exige
+    -- users.verified = true, e os seed users publicam no feed da aba Inicio.
+    true as verified,
     (timestamp with time zone '2025-01-01 12:00:00+00' + ((gs.i - 1) * interval '1 day')) as last_updated_at,
     (
         first_names[((gs.i - 1) % array_length(first_names, 1)) + 1]

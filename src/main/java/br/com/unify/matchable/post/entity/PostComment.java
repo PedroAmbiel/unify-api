@@ -1,7 +1,12 @@
 package br.com.unify.matchable.post.entity;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import br.com.unify.matchable.user.entity.User;
@@ -57,5 +62,33 @@ public class PostComment extends PanacheEntityBase {
 
     public static PostComment findByIdAndPost(UUID id, Post post) {
         return find("id = ?1 and post = ?2", id, post).firstResult();
+    }
+
+    /** Contagem de comentários de uma página de posts em UMA query (sem N+1). */
+    public static Map<UUID, Long> countByPostIds(Collection<UUID> postIds) {
+        Map<UUID, Long> counts = new HashMap<>();
+        if (postIds == null || postIds.isEmpty()) {
+            return counts;
+        }
+        List<Object[]> rows = getEntityManager()
+                .createQuery("select c.post.id, count(c) from PostComment c where c.post.id in :ids group by c.post.id", Object[].class)
+                .setParameter("ids", postIds)
+                .getResultList();
+        for (Object[] row : rows) {
+            counts.put((UUID) row[0], (Long) row[1]);
+        }
+        return counts;
+    }
+
+    /** Ids (dentro de {@code postIds}) em que o usuário comentou, em UMA query. */
+    public static Set<UUID> listPostIdsByUser(User user, Collection<UUID> postIds) {
+        if (user == null || postIds == null || postIds.isEmpty()) {
+            return new HashSet<>();
+        }
+        return new HashSet<>(getEntityManager()
+                .createQuery("select distinct c.post.id from PostComment c where c.author = :user and c.post.id in :ids", UUID.class)
+                .setParameter("user", user)
+                .setParameter("ids", postIds)
+                .getResultList());
     }
 }

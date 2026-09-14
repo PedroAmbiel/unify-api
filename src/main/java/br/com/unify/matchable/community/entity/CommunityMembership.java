@@ -59,6 +59,28 @@ public class CommunityMembership extends PanacheEntityBase {
         return find("community = ?1 and userProfile.id = ?2", community, userProfileId).firstResult();
     }
 
+    /** Ids das comunidades em que o usuário é membro (feed da aba Início). */
+    public static List<UUID> listCommunityIdsByUser(User user) {
+        return getEntityManager()
+                .createQuery("select m.community.id from CommunityMembership m where m.userProfile.user = :user", UUID.class)
+                .setParameter("user", user)
+                .getResultList();
+    }
+
+    /**
+     * Categorias (distintas, não nulas) das comunidades em que o usuário é
+     * membro: afinidade de categoria no ranking do feed da aba Início.
+     */
+    public static List<Integer> listCategoryIdsByUser(User user) {
+        return getEntityManager()
+                .createQuery(
+                        "select distinct m.community.category.id from CommunityMembership m "
+                                + "where m.userProfile.user = :user and m.community.category is not null",
+                        Integer.class)
+                .setParameter("user", user)
+                .getResultList();
+    }
+
     public static long countByCommunity(Community community) {
         return count("community", community);
     }

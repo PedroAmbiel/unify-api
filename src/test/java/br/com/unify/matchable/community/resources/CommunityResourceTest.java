@@ -34,6 +34,7 @@ import br.com.unify.matchable.community.dto.CommunityMemberRoleUpdateRequest;
 import br.com.unify.matchable.community.dto.CommunityMembershipResponse;
 import br.com.unify.matchable.community.dto.CommunityPageResponse;
 import br.com.unify.matchable.community.dto.CommunityPostResponse;
+import br.com.unify.matchable.community.dto.CommunityPostUpdateRequest;
 import br.com.unify.matchable.community.dto.CommunitySummaryResponse;
 import br.com.unify.matchable.community.enums.CommunityMemberRole;
 import br.com.unify.matchable.community.enums.CommunityPrivacy;
@@ -337,7 +338,7 @@ class CommunityResourceTest {
         service.commentsResponse = PageResponse.of(
                 List.of(new CommunityCommentResponse(
                         UUID.randomUUID(),
-                        new CommunityAuthorResponse(UUID.randomUUID(), "Larissa Costa", null),
+                        new CommunityAuthorResponse(UUID.randomUUID(), UUID.randomUUID(), "Larissa Costa", null),
                         "há 2 minutos",
                         "Primeiro comentário",
                         false
@@ -524,10 +525,11 @@ class CommunityResourceTest {
         UUID communityId = UUID.randomUUID();
         service.postResponse = new CommunityPostResponse(
                 postId,
-                new CommunityAuthorResponse(UUID.randomUUID(), "Mariana Costa", null),
+                new CommunityAuthorResponse(UUID.randomUUID(), UUID.randomUUID(), "Mariana Costa", null),
                 "agora mesmo",
                 "Conteúdo publicado",
                 "/communities/posts/" + postId + "/media",
+                null,
                 0L,
                 0L,
                 false,
@@ -545,6 +547,39 @@ class CommunityResourceTest {
         assertEquals(communityId, service.capturedCommunityId);
         assertEquals("Conteúdo publicado", service.capturedBody);
         assertArrayEquals(new byte[] { 9, 9, 9 }, service.capturedImageBytes);
+    }
+
+    @Test
+    void updatePostReturnsOkAndForwardsBody() {
+        StubCommunityService service = new StubCommunityService();
+        UUID postId = UUID.randomUUID();
+        service.postResponse = buildPost("texto editado");
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.updatePost(postId, new CommunityPostUpdateRequest("texto editado"));
+
+        assertEquals(200, response.getStatus());
+        assertEquals(postId, service.capturedPostId);
+        assertEquals("texto editado", service.capturedBody);
+        assertEquals("texto editado", assertInstanceOf(CommunityPostResponse.class, response.getEntity()).body());
+    }
+
+    @Test
+    void updatePostByOtherUserMapsToForbidden() {
+        StubCommunityService service = new StubCommunityService();
+        service.securityException = new ForbiddenException("Só o autor pode editar a publicação");
+
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.updatePost(UUID.randomUUID(), new CommunityPostUpdateRequest("x"));
+
+        assertEquals(403, response.getStatus());
+        assertEquals("AUTH_FORBIDDEN", assertInstanceOf(ErrorResponse.class, response.getEntity()).error());
     }
 
     @Test
@@ -616,9 +651,10 @@ class CommunityResourceTest {
     private CommunityPostResponse buildPost(String body) {
         return new CommunityPostResponse(
                 UUID.randomUUID(),
-                new CommunityAuthorResponse(UUID.randomUUID(), "Pedro Ambiel", null),
+                new CommunityAuthorResponse(UUID.randomUUID(), UUID.randomUUID(), "Pedro Ambiel", null),
                 "há 1 hora",
                 body,
+                null,
                 null,
                 3L,
                 1L,
@@ -640,7 +676,7 @@ class CommunityResourceTest {
                 "Espaço colaborativo",
                 "/communities/" + communityId + "/icon",
                 true,
-                new CommunityAuthorResponse(ownerId, "Owner Unify", null),
+                new CommunityAuthorResponse(ownerId, UUID.randomUUID(), "Owner Unify", null),
                 CommunityMemberRole.ADMIN,
                 true,
                 category,
@@ -974,6 +1010,23 @@ class CommunityResourceTest {
             capturedImageBytes = imageBytes;
             if (validationException != null) {
                 throw validationException;
+            }
+            if (notFoundException != null) {
+                throw notFoundException;
+            }
+            return postResponse;
+        }
+
+        @Override
+        public CommunityPostResponse updatePost(User user, UUID postId, String body) {
+            capturedUser = user;
+            capturedPostId = postId;
+            capturedBody = body;
+            if (validationException != null) {
+                throw validationException;
+            }
+            if (securityException != null) {
+                throw securityException;
             }
             if (notFoundException != null) {
                 throw notFoundException;

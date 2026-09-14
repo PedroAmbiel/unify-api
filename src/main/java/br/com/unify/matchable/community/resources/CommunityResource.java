@@ -16,6 +16,7 @@ import br.com.unify.matchable.common.image.ImageResponses;
 import br.com.unify.matchable.common.resources.AuthenticatedResource;
 import br.com.unify.matchable.community.dto.CommunityCommentCreateRequest;
 import br.com.unify.matchable.community.dto.CommunityMemberRoleUpdateRequest;
+import br.com.unify.matchable.community.dto.CommunityPostUpdateRequest;
 import br.com.unify.matchable.community.services.CommunityService;
 import br.com.unify.matchable.user.entity.User;
 import jakarta.annotation.security.RolesAllowed;
@@ -453,6 +454,29 @@ public class CommunityResource extends AuthenticatedResource {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
             return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @PUT
+    @Path("/posts/{postId}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Transactional
+    public Response updatePost(@PathParam("postId") UUID postId, CommunityPostUpdateRequest request) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(communityService.updatePost(user, postId, request == null ? null : request.body())).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        } catch (ForbiddenException exception) {
+            return forbiddenResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }

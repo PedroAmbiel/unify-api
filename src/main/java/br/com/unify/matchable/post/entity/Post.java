@@ -3,7 +3,10 @@ package br.com.unify.matchable.post.entity;
 import java.sql.Blob;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.hibernate.annotations.Check;
@@ -72,6 +75,26 @@ public class Post extends PanacheEntityBase {
     @ColumnDefault("true")
     @Column(name = "active", nullable = false)
     public boolean active = true;
+
+    /** Instante da última edição do texto (V14); nulo = nunca editada. */
+    @Column(name = "edited_at")
+    public Instant editedAt;
+
+    /**
+     * Posts ativos pelos ids, na MESMA ordem da lista recebida (o ranking do
+     * feed da aba Início decide a ordem em SQL; aqui só se hidrata a entidade).
+     * Ids sem post ativo são ignorados.
+     */
+    public static List<Post> listActiveByIdsInOrder(List<UUID> orderedIds) {
+        if (orderedIds == null || orderedIds.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, Post> byId = new HashMap<>();
+        for (Post post : Post.<Post>list("id in ?1 and active = true", orderedIds)) {
+            byId.put(post.id, post);
+        }
+        return orderedIds.stream().map(byId::get).filter(Objects::nonNull).toList();
+    }
 
     public static List<Post> listByCommunity(Community community) {
         return queryByCommunity(community).list();

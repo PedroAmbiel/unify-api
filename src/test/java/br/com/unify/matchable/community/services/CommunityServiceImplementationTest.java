@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -66,6 +68,24 @@ class CommunityServiceImplementationTest {
 
         // 404 (RESOURCE_NOT_FOUND) e nao 403: nao vazamos a existencia da comunidade privada.
         assertEquals("Comunidade não encontrada", exception.getMessage());
+    }
+
+    @Test
+    void canReadCommunity_privadaSoParaMembro_publicaParaTodos() {
+        CommunityServiceImplementation service = new CommunityServiceImplementation();
+        Community privateCommunity = buildCommunity();
+        privateCommunity.privacy = CommunityPrivacy.PRIVATE;
+        Community publicCommunity = buildCommunity();
+        publicCommunity.privacy = CommunityPrivacy.PUBLIC;
+        User member = buildUser();
+        CommunityMembership membership = buildMembership(privateCommunity, member, CommunityMemberRole.MEMBER);
+
+        // getFeed usa esta resposta para devolver só o cabeçalho (sem 404) ao não membro.
+        assertFalse(service.canReadCommunity(privateCommunity, buildUser(), noMembership()));
+        assertFalse(service.canReadCommunity(privateCommunity, null, noMembership()));
+        assertTrue(service.canReadCommunity(privateCommunity, member, membershipOf(member, membership)));
+        assertTrue(service.canReadCommunity(publicCommunity, buildUser(), noMembership()));
+        assertTrue(service.canReadCommunity(null, null, noMembership()));
     }
 
     @Test

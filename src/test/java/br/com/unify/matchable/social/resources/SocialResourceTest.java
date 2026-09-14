@@ -17,9 +17,15 @@ import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.social.dto.FollowActionResponse;
 import br.com.unify.matchable.social.dto.FollowPageResponse;
 import br.com.unify.matchable.social.dto.FollowStatsResponse;
+import br.com.unify.matchable.post.enums.PostOrigin;
 import br.com.unify.matchable.social.dto.UserFeedPageResponse;
 import br.com.unify.matchable.social.dto.UserPostAuthorResponse;
+import br.com.unify.matchable.social.dto.UserPostCommentCreateRequest;
+import br.com.unify.matchable.social.dto.UserPostCommentPageResponse;
+import br.com.unify.matchable.social.dto.UserPostCommentResponse;
+import br.com.unify.matchable.social.dto.UserPostLikeResponse;
 import br.com.unify.matchable.social.dto.UserPostResponse;
+import br.com.unify.matchable.social.dto.UserPostUpdateRequest;
 import br.com.unify.matchable.social.services.SocialService;
 import br.com.unify.matchable.user.entity.User;
 import jakarta.ws.rs.core.Response;
@@ -156,13 +162,112 @@ class SocialResourceTest {
         assertEquals(404, resource.createPost("x", null).getStatus());
     }
 
+    @Test
+    void updatePostReturnsOkAndForwardsBody() {
+        StubSocialService service = new StubSocialService();
+        service.postResponse = buildPost(null);
+        TestableSocialResource resource = buildResource(service);
+        UUID postId = UUID.randomUUID();
+
+        Response response = resource.updatePost(postId, new UserPostUpdateRequest("novo texto"));
+
+        assertEquals(200, response.getStatus());
+        assertEquals(postId, service.capturedPostId);
+        assertEquals("novo texto", service.capturedBody);
+        assertInstanceOf(UserPostResponse.class, response.getEntity());
+    }
+
+    @Test
+    void updatePostMapsForbiddenNotFoundAndBadRequest() {
+        StubSocialService service = new StubSocialService();
+        TestableSocialResource resource = buildResource(service);
+
+        service.nextException = new ForbiddenException("Só o autor pode editar a publicação");
+        assertEquals(403, resource.updatePost(UUID.randomUUID(), new UserPostUpdateRequest("x")).getStatus());
+
+        service.nextException = new NoSuchElementException("Publicação não encontrada");
+        assertEquals(404, resource.updatePost(UUID.randomUUID(), new UserPostUpdateRequest("x")).getStatus());
+
+        service.nextException = new IllegalArgumentException("Escreva o texto da publicação");
+        assertEquals(400, resource.updatePost(UUID.randomUUID(), null).getStatus());
+    }
+
+    @Test
+    void likeAndUnlikeReturnOkWithLikeResponse() {
+        StubSocialService service = new StubSocialService();
+        TestableSocialResource resource = buildResource(service);
+        UUID postId = UUID.randomUUID();
+
+        Response liked = resource.likePost(postId);
+        assertEquals(200, liked.getStatus());
+        UserPostLikeResponse likedBody = assertInstanceOf(UserPostLikeResponse.class, liked.getEntity());
+        assertEquals(postId, likedBody.postId());
+        assertEquals(true, likedBody.likedByCurrentUser());
+
+        Response unliked = resource.unlikePost(postId);
+        assertEquals(200, unliked.getStatus());
+        assertEquals(false, assertInstanceOf(UserPostLikeResponse.class, unliked.getEntity()).likedByCurrentUser());
+
+        service.nextException = new NoSuchElementException("Publicação não encontrada");
+        assertEquals(404, resource.likePost(postId).getStatus());
+        assertEquals(404, resource.unlikePost(postId).getStatus());
+    }
+
+    @Test
+    void commentsEndpointsMapStatuses() {
+        StubSocialService service = new StubSocialService();
+        TestableSocialResource resource = buildResource(service);
+        UUID postId = UUID.randomUUID();
+        UUID commentId = UUID.randomUUID();
+
+        Response page = resource.getComments(postId, 0, 20);
+        assertEquals(200, page.getStatus());
+        assertEquals(1, assertInstanceOf(UserPostCommentPageResponse.class, page.getEntity()).comments().size());
+
+        Response created = resource.createComment(postId, new UserPostCommentCreateRequest("oi"));
+        assertEquals(201, created.getStatus());
+        assertEquals("oi", service.capturedBody);
+        assertInstanceOf(UserPostCommentResponse.class, created.getEntity());
+
+        Response deleted = resource.deleteComment(postId, commentId);
+        assertEquals(204, deleted.getStatus());
+        assertEquals(commentId, service.capturedCommentId);
+
+        service.nextException = new ForbiddenException("Só quem escreveu o comentário ou o autor da publicação pode excluí-lo");
+        assertEquals(403, resource.deleteComment(postId, commentId).getStatus());
+
+        service.nextException = new IllegalArgumentException("Escreva o texto do comentário");
+        assertEquals(400, resource.createComment(postId, null).getStatus());
+
+        service.nextException = new NoSuchElementException("Publicação não encontrada");
+        assertEquals(404, resource.getComments(postId, 0, 20).getStatus());
+    }
+
     private static UserPostResponse buildPost(String mediaUrl) {
         return new UserPostResponse(
                 UUID.randomUUID(),
+                PostOrigin.PERSONAL,
+                null,
                 new UserPostAuthorResponse(UUID.randomUUID(), UUID.randomUUID(), "Marina Souza", null),
                 "corpo",
                 mediaUrl,
-                Instant.now()
+                Instant.now(),
+                null,
+                0,
+                0,
+                false,
+                false,
+                null
+        );
+    }
+
+    private static UserPostCommentResponse buildComment() {
+        return new UserPostCommentResponse(
+                UUID.randomUUID(),
+                new UserPostAuthorResponse(UUID.randomUUID(), UUID.randomUUID(), "Marina Souza", null),
+                "oi",
+                Instant.now(),
+                true
         );
     }
 
@@ -197,6 +302,8 @@ class SocialResourceTest {
         private UserFeedPageResponse feedResponse;
         private String capturedBody;
         private byte[] capturedImage;
+        private UUID capturedPostId;
+        private UUID capturedCommentId;
 
         private void maybeThrow() {
             if (nextException != null) {
@@ -243,8 +350,49 @@ class SocialResourceTest {
         }
 
         @Override
+        public UserPostResponse updatePost(User currentUser, UUID postId, String body) {
+            maybeThrow();
+            capturedPostId = postId;
+            capturedBody = body;
+            return postResponse;
+        }
+
+        @Override
         public void deletePost(User currentUser, UUID postId) {
             maybeThrow();
+        }
+
+        @Override
+        public UserPostLikeResponse likePost(User currentUser, UUID postId) {
+            maybeThrow();
+            return new UserPostLikeResponse(postId, 1, true);
+        }
+
+        @Override
+        public UserPostLikeResponse unlikePost(User currentUser, UUID postId) {
+            maybeThrow();
+            return new UserPostLikeResponse(postId, 0, false);
+        }
+
+        @Override
+        public UserPostCommentPageResponse getComments(User currentUser, UUID postId, Integer page, Integer size) {
+            maybeThrow();
+            return new UserPostCommentPageResponse(List.of(buildComment()), 0, 20, 1L, false);
+        }
+
+        @Override
+        public UserPostCommentResponse createComment(User currentUser, UUID postId, String body) {
+            maybeThrow();
+            capturedPostId = postId;
+            capturedBody = body;
+            return buildComment();
+        }
+
+        @Override
+        public void deleteComment(User currentUser, UUID postId, UUID commentId) {
+            maybeThrow();
+            capturedPostId = postId;
+            capturedCommentId = commentId;
         }
 
         @Override

@@ -15,6 +15,8 @@ import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.common.exceptions.PayloadTooLargeException;
 import br.com.unify.matchable.common.image.ImageResponses;
 import br.com.unify.matchable.common.resources.AuthenticatedResource;
+import br.com.unify.matchable.social.dto.UserPostCommentCreateRequest;
+import br.com.unify.matchable.social.dto.UserPostUpdateRequest;
 import br.com.unify.matchable.social.services.SocialService;
 import br.com.unify.matchable.user.entity.User;
 import jakarta.annotation.security.RolesAllowed;
@@ -24,6 +26,7 @@ import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -43,6 +46,9 @@ import jakarta.ws.rs.core.Response;
  * UserProfileResource ({@code @Path("/users/me")}) e devolve 404.
  * Regra: nunca criar outra classe cujo {@code @Path} seja prefixo-mais-longo
  * de rotas servidas por esta.
+ *
+ * {@code /users/posts/{postId}} (literal "posts") não colide com
+ * {@code /users/{userProfileId}/posts}: o segmento literal vence o parâmetro.
  *
  * Os try/catch locais existem porque SocialResourceTest chama os métodos
  * direto (sem GlobalExceptionMapper), igual ao CommunityResource.
@@ -182,6 +188,29 @@ public class SocialResource extends AuthenticatedResource {
         }
     }
 
+    @PUT
+    @Path("/posts/{postId}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Transactional
+    public Response updatePost(@PathParam("postId") UUID postId, UserPostUpdateRequest request) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(socialService.updatePost(user, postId, request == null ? null : request.body())).build();
+        } catch (ForbiddenException exception) {
+            return forbiddenResponse(exception.getMessage());
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
     @DELETE
     @Path("/posts/{postId}")
     @Transactional
@@ -257,6 +286,114 @@ public class SocialResource extends AuthenticatedResource {
 
         try {
             return Response.ok(socialService.listPostsByProfile(user, userProfileId, page, size)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    // --------------------------------------------------- likes / comments
+
+    @POST
+    @Path("/posts/{postId}/likes")
+    @Transactional
+    public Response likePost(@PathParam("postId") UUID postId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(socialService.likePost(user, postId)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @DELETE
+    @Path("/posts/{postId}/likes")
+    @Transactional
+    public Response unlikePost(@PathParam("postId") UUID postId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(socialService.unlikePost(user, postId)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @GET
+    @Path("/posts/{postId}/comments")
+    @Transactional
+    public Response getComments(
+            @PathParam("postId") UUID postId,
+            @QueryParam("page") Integer page,
+            @QueryParam("size") Integer size
+    ) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(socialService.getComments(user, postId, page, size)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @POST
+    @Path("/posts/{postId}/comments")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Transactional
+    public Response createComment(@PathParam("postId") UUID postId, UserPostCommentCreateRequest request) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.status(Response.Status.CREATED)
+                    .entity(socialService.createComment(user, postId, request == null ? null : request.body()))
+                    .build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @DELETE
+    @Path("/posts/{postId}/comments/{commentId}")
+    @Transactional
+    public Response deleteComment(@PathParam("postId") UUID postId, @PathParam("commentId") UUID commentId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            socialService.deleteComment(user, postId, commentId);
+            return Response.noContent().build();
+        } catch (ForbiddenException exception) {
+            return forbiddenResponse(exception.getMessage());
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {

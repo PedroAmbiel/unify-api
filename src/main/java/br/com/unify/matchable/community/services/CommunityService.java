@@ -65,6 +65,9 @@ public interface CommunityService {
 
     CommunityPostResponse createPost(User user, UUID communityId, String body, byte[] imageBytes);
 
+    /** Só o autor edita, e só o texto; marca {@code editedAt}. */
+    CommunityPostResponse updatePost(User user, UUID postId, String body);
+
     void deletePost(User user, UUID postId);
 
     CommunityLikeResponse likePost(User user, UUID postId);

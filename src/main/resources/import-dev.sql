@@ -23,23 +23,30 @@ insert into
 insert into user_profiles(id, fk_user)
 values ('01972a85-e1fd-7309-8f49-7d2168c18c11', '019dbf9a-5a8e-72de-85cb-8426b424c6fe');
 
-insert into communities(id, active, featured, description, name, fk_owner_user, privacy)
+-- Interesses do Pedro (Tecnologia, Jogos, Musica): base da afinidade de
+-- perfis sugeridos no feed da aba Inicio (ver import-posts.sql).
+insert into user_profile_interest_types(fk_user_profile, fk_interest_type)
+values ('01972a85-e1fd-7309-8f49-7d2168c18c11', 3),
+       ('01972a85-e1fd-7309-8f49-7d2168c18c11', 4),
+       ('01972a85-e1fd-7309-8f49-7d2168c18c11', 5);
+
+insert into communities(id, active, featured, description, name, fk_owner_user, fk_category, privacy)
 values ('01972a85-e1fd-7309-8f49-7d2168c18a11', true, true,
     'Espaço da comunidade Unify para compartilhar experiências, apoio e novidades sobre acessibilidade e conexão.',
     'Comunidade Unify',
-    '019dbf9a-5a8e-72de-85cb-8426b424c6fe', 'PUBLIC');
+    '019dbf9a-5a8e-72de-85cb-8426b424c6fe', 4, 'PUBLIC');
 
-insert into communities(id, active, featured, description, name, fk_owner_user, privacy)
+insert into communities(id, active, featured, description, name, fk_owner_user, fk_category, privacy)
 values ('01972a85-e1fc-7309-8f49-7d2168c18a11', true, true,
         'Espaço da comunidade Unify para compartilhar experiências, apoio e novidades sobre acessibilidade e conexão.',
         'Teste Unify',
-        '019dbf9a-5a8e-72de-85cb-8426b424c6fe', 'PUBLIC');
+        '019dbf9a-5a8e-72de-85cb-8426b424c6fe', 3, 'PUBLIC');
 
-insert into communities(id, active, featured, description, name, fk_owner_user, privacy)
+insert into communities(id, active, featured, description, name, fk_owner_user, fk_category, privacy)
 values ('01972a85-e1fb-7309-8f49-7d2168c18a11', true, false,
         'Comunidade privada de teste: entrada precisa ser aprovada por moderação.',
         'Unify Privada',
-        '019dbf9a-5a8e-72de-85cb-8426b424c6fe', 'PRIVATE');
+        '019dbf9a-5a8e-72de-85cb-8426b424c6fe', 10, 'PRIVATE');
 
 insert into community_memberships(id, fk_community, fk_user_profile, role, joined_at)
 values ('01972a85-e1fd-7309-8f49-7d2168c18b11', '01972a85-e1fd-7309-8f49-7d2168c18a11', '01972a85-e1fd-7309-8f49-7d2168c18c11', 'ADMIN', '2024-06-01T00:00:00Z'),
@@ -49,8 +56,8 @@ values ('01972a85-e1fd-7309-8f49-7d2168c18b11', '01972a85-e1fd-7309-8f49-7d2168c
 -- ---------------------------------------------------------------------------
 -- PAR DE DEMONSTRACAO DO ALGORITMO DE MATCH (tela "Encontros")
 --
---   seed.user.ana@unify.dev    -> Abc123!@   (Ana Ribeiro, Mulher, 1996)
---   seed.user.bruno@unify.dev  -> Abc123!@   (Bruno Martins, Homem, 1994)
+--   ana@unify.com    -> Abc123!@   (Ana Ribeiro, Mulher, 1996)
+--   bruno@unify.com  -> Abc123!@   (Bruno Martins, Homem, 1994)
 --
 -- Os dois foram montados para se encontrarem no topo do feed um do outro:
 -- ambos verificados, mesma coordenada ativa (distancia 0 km), diferenca de

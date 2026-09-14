@@ -66,6 +66,7 @@ public class CommunityServiceImplementation implements CommunityService {
     private static final String POST_MEDIA_NOT_FOUND_MESSAGE = "Imagem da publicação não encontrada";
     private static final String POST_BODY_REQUIRED_MESSAGE = "Informe o conteúdo da publicação";
     private static final String POST_DELETE_FORBIDDEN_MESSAGE = "Você não tem permissão para remover esta publicação";
+    private static final String POST_UPDATE_FORBIDDEN_MESSAGE = "Só o autor pode editar a publicação";
     private static final String COMMENT_NOT_FOUND_MESSAGE = "Comentário não encontrado";
     private static final String COMMENT_BODY_REQUIRED_MESSAGE = "Informe o conteúdo do comentário";
     private static final String COMMENT_DELETE_FORBIDDEN_MESSAGE = "Você não tem permissão para remover este comentário";
@@ -265,7 +266,15 @@ public class CommunityServiceImplementation implements CommunityService {
         if (community == null) {
             return new CommunityFeedResponse(null, PageResponse.empty(resolvedPage, resolvedSize));
         }
-        requireReadableCommunity(community, user);
+        // Comunidade PRIVATE para não membro: o cabeçalho (nome, descrição, ícone,
+        // total de membros, visibilidade, botão de pedir entrada) é público; só
+        // as publicações ficam ocultas. Membros nominais continuam em listMembers.
+        if (!canReadCommunity(community, user)) {
+            return new CommunityFeedResponse(
+                    toCommunitySummaryResponse(community, user),
+                    PageResponse.empty(resolvedPage, resolvedSize)
+            );
+        }
 
         PanacheQuery<Post> query = Post.queryByCommunity(community);
         long totalElements = query.count();
@@ -558,6 +567,22 @@ public class CommunityServiceImplementation implements CommunityService {
 
     @Override
     @Transactional
+    public CommunityPostResponse updatePost(User user, UUID postId, String body) {
+        Post post = requirePost(postId);
+        requireMembership(post.community, user);
+        if (!isContentOwner(user, post.author)) {
+            throw new ForbiddenException(POST_UPDATE_FORBIDDEN_MESSAGE);
+        }
+
+        // Só o texto muda; a imagem fica como está.
+        post.body = requireText(body, POST_BODY_REQUIRED_MESSAGE);
+        post.editedAt = Instant.now();
+
+        return toPostResponse(post, user);
+    }
+
+    @Override
+    @Transactional
     public void deletePost(User user, UUID postId) {
         Post post = requirePost(postId);
         CommunityMembership actorMembership = requireMembership(post.community, user);
@@ -769,13 +794,25 @@ public class CommunityServiceImplementation implements CommunityService {
             User user,
             BiFunction<Community, User, CommunityMembership> membershipResolver
     ) {
-        if (community == null || community.privacy != CommunityPrivacy.PRIVATE) {
-            return;
-        }
-
-        if (user == null || membershipResolver.apply(community, user) == null) {
+        if (!canReadCommunity(community, user, membershipResolver)) {
             throw new NoSuchElementException(COMMUNITY_NOT_FOUND_MESSAGE);
         }
+    }
+
+    /** Conteúdo (posts, comentários, mídia) de comunidade PRIVATE só para membros ativos. */
+    boolean canReadCommunity(Community community, User user) {
+        return canReadCommunity(community, user, CommunityMembership::findByCommunityAndUser);
+    }
+
+    boolean canReadCommunity(
+            Community community,
+            User user,
+            BiFunction<Community, User, CommunityMembership> membershipResolver
+    ) {
+        if (community == null || community.privacy != CommunityPrivacy.PRIVATE) {
+            return true;
+        }
+        return user != null && membershipResolver.apply(community, user) != null;
     }
 
     private CommunityMembership requireMembership(Community community, User user) {
@@ -966,6 +1003,7 @@ public class CommunityServiceImplementation implements CommunityService {
                 formatPublishedAt(post.createdAt),
                 post.body,
                 post.mediaOid == null ? null : POST_MEDIA_URL_PREFIX + post.id + POST_MEDIA_URL_SUFFIX,
+                post.editedAt,
                 PostLike.countByPost(post),
                 PostComment.countByPost(post),
                 currentUser != null && PostLike.findByPostAndUser(post, currentUser) != null,
@@ -992,6 +1030,7 @@ public class CommunityServiceImplementation implements CommunityService {
         UserProfile profile = UserProfile.findByUser(author);
         return new CommunityAuthorResponse(
                 author.id,
+                profile == null ? null : profile.id,
                 buildAuthorName(author),
                 hasAvatar(profile) ? AUTHOR_AVATAR_URL_PREFIX + author.id + AUTHOR_AVATAR_URL_SUFFIX : null
         );
