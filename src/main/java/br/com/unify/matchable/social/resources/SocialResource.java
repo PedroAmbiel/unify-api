@@ -19,6 +19,7 @@ import br.com.unify.matchable.social.dto.UserPostCommentCreateRequest;
 import br.com.unify.matchable.social.dto.UserPostUpdateRequest;
 import br.com.unify.matchable.social.services.SocialService;
 import br.com.unify.matchable.user.entity.User;
+import br.com.unify.matchable.user.services.UserBlockService;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -60,6 +61,9 @@ public class SocialResource extends AuthenticatedResource {
 
     @Inject
     SocialService socialService;
+
+    @Inject
+    UserBlockService userBlockService;
 
     @Context
     Request request;
@@ -104,6 +108,134 @@ public class SocialResource extends AuthenticatedResource {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
             return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    // ------------------------------------------------ pedidos para seguir
+
+    /** Pedidos RECEBIDOS pendentes (conta que aprova seguidores). */
+    @GET
+    @Path("/follow-requests")
+    @Transactional
+    public Response listFollowRequests(@QueryParam("page") Integer page, @QueryParam("size") Integer size) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(socialService.listFollowRequests(user, page, size)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        }
+    }
+
+    /** Pedidos que EU enviei e ainda não foram respondidos. */
+    @GET
+    @Path("/follow-requests/sent")
+    @Transactional
+    public Response listSentFollowRequests(@QueryParam("page") Integer page, @QueryParam("size") Integer size) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(socialService.listSentFollowRequests(user, page, size)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        }
+    }
+
+    /** Sem corpo. Só o destinatário; 204 e quem pediu passa a seguir. */
+    @POST
+    @Path("/follow-requests/{requestId}/accept")
+    @Transactional
+    public Response acceptFollowRequest(@PathParam("requestId") UUID requestId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            socialService.acceptFollowRequest(user, requestId);
+            return Response.noContent().build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    /** Destinatário recusa ou quem pediu cancela. 204; 404 para terceiros. */
+    @DELETE
+    @Path("/follow-requests/{requestId}")
+    @Transactional
+    public Response deleteFollowRequest(@PathParam("requestId") UUID requestId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            socialService.deleteFollowRequest(user, requestId);
+            return Response.noContent().build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    // -------------------------------------------------------------- block
+
+    /** Sem corpo. 201 com o bloqueio criado; 409 se já estava bloqueado. */
+    @POST
+    @Path("/{userProfileId}/block")
+    @Transactional
+    public Response block(@PathParam("userProfileId") UUID userProfileId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.status(Response.Status.CREATED)
+                    .entity(userBlockService.blockUser(user, userProfileId))
+                    .build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @DELETE
+    @Path("/{userProfileId}/block")
+    @Transactional
+    public Response unblock(@PathParam("userProfileId") UUID userProfileId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            userBlockService.unblockUser(user, userProfileId);
+            return Response.noContent().build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }

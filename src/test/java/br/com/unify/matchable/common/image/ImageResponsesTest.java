@@ -50,6 +50,21 @@ class ImageResponsesTest {
     }
 
     @Test
+    void binaryKeepsTheGivenContentTypeAndCachePolicy() {
+        byte[] content = new byte[] { 9, 8, 7 };
+
+        Response response = ImageResponses.binary(content, "audio/mp4", new StubRequest(null));
+
+        assertEquals(200, response.getStatus());
+        assertEquals("audio/mp4", response.getMediaType().toString());
+        assertNotNull(response.getEntityTag());
+        assertTrue(response.getHeaderString("Cache-Control").contains("private"));
+
+        Response notModified = ImageResponses.binary(content, "audio/mp4", new StubRequest(response.getEntityTag()));
+        assertEquals(304, notModified.getStatus());
+    }
+
+    @Test
     void jpegProducesDifferentEtagsForDifferentContent() {
         EntityTag first = ImageResponses.jpeg(new byte[] { 1 }, new StubRequest(null)).getEntityTag();
         EntityTag second = ImageResponses.jpeg(new byte[] { 2 }, new StubRequest(null)).getEntityTag();

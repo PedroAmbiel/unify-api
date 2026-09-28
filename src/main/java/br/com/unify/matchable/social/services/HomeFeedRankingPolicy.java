@@ -31,9 +31,10 @@ import jakarta.persistence.Query;
  *   <li>Meus posts pessoais nunca entram (ficam na aba Perfil).</li>
  *   <li>Posts de comunidade só entram se a comunidade está ativa e é PÚBLICA,
  *       ou se eu sou membro dela (aí vale também para privadas).</li>
- *   <li>Perfis de usuário: hoje todos são públicos. O ponto único para a
- *       semana 04 (perfil privado / {@code feedVisibility} / bloqueio) é
- *       {@link #authorVisibilityFilter()} + {@link Context#hiddenAuthorUserIds()}.</li>
+ *   <li>Privacidade (semana 04): autores bloqueados em qualquer direção
+ *       nunca entram ({@link Context#hiddenAuthorUserIds()}); post pessoal
+ *       de quem restringiu a seguidores só entra se eu sigo o autor
+ *       ({@link #authorVisibilityFilter()}).</li>
  * </ul>
  *
  * <p>Toda a pontuação é calculada no Postgres (query nativa), então a paginação
@@ -91,7 +92,7 @@ public final class HomeFeedRankingPolicy {
      * @param memberCommunityIds  comunidades em que sou membro (públicas ou privadas).
      * @param interestTypeIds     meus {@code interest_types}.
      * @param communityCategoryIds categorias das comunidades em que já participo.
-     * @param hiddenAuthorUserIds autores que NUNCA devem aparecer (semana 04: bloqueios). Vazio hoje.
+     * @param hiddenAuthorUserIds autores que NUNCA devem aparecer (bloqueados em qualquer direção).
      */
     public record Context(
             UUID currentUserId,
@@ -108,14 +109,21 @@ public final class HomeFeedRankingPolicy {
     }
 
     /**
-     * Filtro de visibilidade do AUTOR de post pessoal. Hoje todo perfil é
-     * público, então o filtro é neutro. Semana 04: perfil privado /
-     * {@code feedVisibility = FOLLOWERS_ONLY} entra aqui como um
-     * {@code left join user_privacy_settings ... coalesce(...)} (nunca inner
-     * join: quem nunca salvou configuração conta como público).
+     * Filtro de visibilidade do AUTOR de post pessoal ({@code feedVisibility} e conta
+     * privada — gêmeo de {@code UserPrivacySettings.restrictsPostsToFollowers}).
+     * Post de comunidade segue a privacidade da comunidade, não a do autor.
+     * {@code not exists} (nunca inner join): quem nunca salvou configuração
+     * não tem linha em user_privacy_settings e conta como PUBLIC.
      */
     static String authorVisibilityFilter() {
-        return "true";
+        return """
+                p.origin <> 'PERSONAL'
+                or p.fk_user in (:followedUserIds)
+                or not exists (
+                    select 1 from user_privacy_settings ps
+                    where ps.fk_user = p.fk_user
+                      and (ps.feed_visibility = 'FOLLOWERS_ONLY' or ps.follow_approval_required = true))
+                """;
     }
 
     /**

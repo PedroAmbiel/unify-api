@@ -12,6 +12,7 @@ import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
 import br.com.unify.matchable.common.image.ImageResponses;
 import br.com.unify.matchable.common.exceptions.PayloadTooLargeException;
+import br.com.unify.matchable.common.media.AudioContent;
 import br.com.unify.matchable.common.resources.AuthenticatedResource;
 import br.com.unify.matchable.user.dto.UserMatchPreferencesUpsertRequest;
 import br.com.unify.matchable.user.dto.UserProfileUpsertRequest;
@@ -59,6 +60,12 @@ public class UserProfileResource extends AuthenticatedResource {
             defaultValue = "5242880"
     )
     long maxImageBytes;
+
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "unify.profile.audio.max-size-bytes",
+            defaultValue = "3145728"
+    )
+    long maxPresentationAudioBytes;
 
     @GET
     @Path("/profile")
@@ -146,7 +153,7 @@ public class UserProfileResource extends AuthenticatedResource {
         }
 
         try {
-            return Response.ok(userProfileService.getPublicProfile(userProfileId)).build();
+            return Response.ok(userProfileService.getPublicProfile(user, userProfileId)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
@@ -164,7 +171,7 @@ public class UserProfileResource extends AuthenticatedResource {
         }
 
         try {
-            return Response.ok(userProfileService.getPublicGalleryImages(userProfileId)).build();
+            return Response.ok(userProfileService.getPublicGalleryImages(user, userProfileId)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
@@ -186,7 +193,7 @@ public class UserProfileResource extends AuthenticatedResource {
         }
 
         try {
-            return ImageResponses.jpeg(userProfileService.getPublicGalleryImageContent(userProfileId, imageId), request);
+            return ImageResponses.jpeg(userProfileService.getPublicGalleryImageContent(user, userProfileId, imageId), request);
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
@@ -277,6 +284,135 @@ public class UserProfileResource extends AuthenticatedResource {
             return ImageResponses.jpeg(userProfileService.getImageContent(user, imageId), request);
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    // ------------------------------------------- áudio de apresentação (frente D)
+
+    @GET
+    @Path("/profile/audio")
+    @Transactional
+    public Response getPresentationAudio() {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+        return Response.ok(userProfileService.getPresentationAudio(user)).build();
+    }
+
+    /** Multipart: {@code audio} (arquivo) + {@code durationSeconds} (1..60). Substitui o anterior. */
+    @PUT
+    @Path("/profile/audio")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Transactional
+    public Response uploadPresentationAudio(
+            @RestForm("audio") FileUpload audio,
+            @RestForm("durationSeconds") Integer durationSeconds
+    ) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            byte[] bytes = readUploadedAudioBytes(audio);
+            String contentType = audio == null ? null : audio.contentType();
+            return Response.ok(userProfileService.uploadPresentationAudio(
+                    user, contentType, bytes, durationSeconds)).build();
+        } catch (PayloadTooLargeException exception) {
+            return payloadTooLargeResponse(exception.getMessage());
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        }
+    }
+
+    @DELETE
+    @Path("/profile/audio")
+    @Transactional
+    public Response deletePresentationAudio() {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            userProfileService.deletePresentationAudio(user);
+            return Response.noContent().build();
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    /** Bytes do MEU áudio. {@code @Produces} curinga + {@code type} explícito (ver ImageResponses.binary). */
+    @GET
+    @Path("/profile/audio/{audioId}")
+    @Produces("*/*")
+    @Transactional
+    public Response getPresentationAudioContent(@PathParam("audioId") UUID audioId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            AudioContent content = userProfileService.getPresentationAudioContent(user, audioId);
+            return ImageResponses.binary(content.bytes(), content.contentType(), request);
+        } catch (NoSuchElementException exception) {
+            return jsonError(resourceNotFoundResponse(exception.getMessage()));
+        }
+    }
+
+    /** Bytes do áudio de OUTRO perfil — mesma guarda do perfil público (verificado, bloqueio). */
+    @GET
+    @Path("/profile/public/audio/{audioId}")
+    @Produces("*/*")
+    @Transactional
+    public Response getPublicPresentationAudioContent(
+            @QueryParam("userProfileId") UUID userProfileId,
+            @PathParam("audioId") UUID audioId
+    ) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            AudioContent content = userProfileService.getPublicPresentationAudioContent(user, userProfileId, audioId);
+            return ImageResponses.binary(content.bytes(), content.contentType(), request);
+        } catch (IllegalArgumentException exception) {
+            return jsonError(validationErrorResponse(exception.getMessage()));
+        } catch (NoSuchElementException exception) {
+            return jsonError(resourceNotFoundResponse(exception.getMessage()));
+        }
+    }
+
+    /** Erro de endpoint binário: sem o tipo explícito a negociação herdaria o curinga do método. */
+    private Response jsonError(Response response) {
+        return Response.fromResponse(response).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    protected byte[] readUploadedAudioBytes(FileUpload audio) {
+        if (audio == null || audio.uploadedFile() == null) {
+            throw new IllegalArgumentException("Nenhum áudio foi enviado no campo 'audio'");
+        }
+
+        if (audio.size() > maxPresentationAudioBytes) {
+            throw new PayloadTooLargeException(
+                    "O áudio enviado tem " + audio.size()
+                            + " bytes e o limite é de " + maxPresentationAudioBytes + " bytes"
+            );
+        }
+
+        try {
+            byte[] bytes = Files.readAllBytes(audio.uploadedFile());
+            if (bytes.length == 0) {
+                throw new IllegalArgumentException("Nenhum áudio foi enviado no campo 'audio'");
+            }
+            return bytes;
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Não foi possível ler o áudio enviado", exception);
         }
     }
 

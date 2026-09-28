@@ -29,8 +29,10 @@ import br.com.unify.matchable.common.image.OidImageService;
 import br.com.unify.matchable.user.dto.UserProfileImageResponse;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserPossibleMatch;
+import br.com.unify.matchable.user.entity.UserPrivacySettings;
 import br.com.unify.matchable.user.entity.UserProfile;
 import br.com.unify.matchable.user.entity.UserProfileImage;
+import br.com.unify.matchable.user.services.UserBlockService;
 import io.quarkus.hibernate.orm.panache.PanacheQuery;
 import io.quarkus.panache.common.Page;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -56,6 +58,7 @@ public class ChatServiceImplementation implements ChatService {
     private static final String NOT_THE_SENDER = "Só quem enviou a mensagem pode alterá-la";
     private static final String MESSAGE_DELETED = "Esta mensagem foi apagada";
     private static final String DELETED_PREVIEW = "Mensagem apagada";
+    static final String BLOCKED_MESSAGE = "Não é possível enviar mensagens para este usuário";
 
     private static final String INVALID_PAGE_MESSAGE =
             "O parâmetro 'page' deve ser maior ou igual a zero";
@@ -67,6 +70,9 @@ public class ChatServiceImplementation implements ChatService {
 
     @Inject
     OidImageService oidImageService;
+
+    @Inject
+    UserBlockService userBlockService;
 
     // ================= listagem =================
 
@@ -231,6 +237,7 @@ public class ChatServiceImplementation implements ChatService {
     public ChatMessageResponse sendTextMessage(User user, UUID conversationId, String body) {
         UserProfile currentProfile = requireProfile(user);
         Conversation conversation = requireParticipation(conversationId, currentProfile);
+        requireNotBlocked(conversation, currentProfile);
 
         String normalizedBody = body == null ? "" : body.trim();
         if (normalizedBody.isEmpty()) {
@@ -256,6 +263,7 @@ public class ChatServiceImplementation implements ChatService {
 
         UserProfile currentProfile = requireProfile(user);
         Conversation conversation = requireParticipation(conversationId, currentProfile);
+        requireNotBlocked(conversation, currentProfile);
 
         if (payload == null || payload.bytes() == null || payload.bytes().length == 0) {
             throw new IllegalArgumentException("Nenhuma mídia foi enviada");
@@ -315,6 +323,7 @@ public class ChatServiceImplementation implements ChatService {
     public ChatMessageResponse editMessage(User user, UUID conversationId, UUID messageId, String body) {
         UserProfile currentProfile = requireProfile(user);
         Conversation conversation = requireParticipation(conversationId, currentProfile);
+        requireNotBlocked(conversation, currentProfile);
         ChatMessage message = requireOwnMessage(conversation, messageId, currentProfile);
 
         if (message.isDeleted()) {
@@ -419,6 +428,19 @@ public class ChatServiceImplementation implements ChatService {
         return conversation;
     }
 
+    /**
+     * Bloqueio em qualquer direção impede mensagem nova (e edição) nos dois
+     * sentidos: 409, que o app usa para travar o compositor. O histórico NÃO é
+     * apagado — continua legível para quem já participava da conversa.
+     */
+    private void requireNotBlocked(Conversation conversation, UserProfile currentProfile) {
+        UserProfile otherProfile = conversation.otherParticipant(currentProfile);
+        if (otherProfile != null && otherProfile.user != null
+                && userBlockService.isBlockedEitherDirection(currentProfile.user.id, otherProfile.user.id)) {
+            throw new IllegalStateException(BLOCKED_MESSAGE);
+        }
+    }
+
     private UserProfile requireProfile(User user) {
         UserProfile profile = UserProfile.findByUser(user);
         if (profile == null) {
@@ -483,7 +505,8 @@ public class ChatServiceImplementation implements ChatService {
                 otherUser == null ? null : otherUser.id,
                 otherProfile == null ? null : otherProfile.id,
                 buildFullName(otherProfile),
-                calculateAge(otherUser),
+                // Privacidade do outro: idade oculta sai nula (mesma regra do perfil público).
+                UserPrivacySettings.showsAge(otherUser) ? calculateAge(otherUser) : null,
                 buildProfilePhoto(otherProfile),
                 conversation.createdAt,
                 conversation.lastMessageAt

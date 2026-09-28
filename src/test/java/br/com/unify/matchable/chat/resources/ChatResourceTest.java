@@ -717,6 +717,55 @@ class ChatResourceTest {
                 .body("conversations[0].unreadCount", equalTo(1));
     }
 
+    // ---------------------------------------------------------------- bloqueio (semana 04)
+
+    @Test
+    void blockInEitherDirectionRejectsNewMessagesButKeepsHistory() {
+        TestUser alice = createUser("Alice", "Bloqueio");
+        TestUser bob = createUser("Bob", "Bloqueio");
+        String conversationId = openConversation(alice, createMatch(alice, bob, true));
+        sendText(bob, conversationId, "antes do bloqueio");
+
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .post("/users/" + bob.profileId() + "/block")
+        .then()
+                .statusCode(201)
+                .body("userProfileId", equalTo(bob.profileId().toString()));
+
+        // Nos dois sentidos: quem bloqueou e quem foi bloqueado.
+        for (TestUser sender : List.of(alice, bob)) {
+            given()
+                    .auth().oauth2(sender.token())
+                    .contentType(ContentType.JSON)
+                    .body("{\"body\":\"depois do bloqueio\"}")
+            .when()
+                    .post(CHATS_PATH + "/" + conversationId + "/messages")
+            .then()
+                    .statusCode(409)
+                    .body("error", equalTo("RESOURCE_CONFLICT"));
+        }
+
+        // Histórico continua legível.
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(200)
+                .body("messages.size()", equalTo(1));
+
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .delete("/users/" + bob.profileId() + "/block")
+        .then()
+                .statusCode(204);
+
+        sendText(bob, conversationId, "depois do desbloqueio");
+    }
+
     // ---- apoio ----------------------------------------------------------
 
     private void sendText(TestUser sender, String conversationId, String body) {

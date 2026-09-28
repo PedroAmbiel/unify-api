@@ -4,6 +4,7 @@ import java.util.UUID;
 
 import br.com.unify.matchable.social.dto.FollowActionResponse;
 import br.com.unify.matchable.social.dto.FollowPageResponse;
+import br.com.unify.matchable.social.dto.FollowRequestPageResponse;
 import br.com.unify.matchable.social.dto.FollowStatsResponse;
 import br.com.unify.matchable.social.dto.UserFeedPageResponse;
 import br.com.unify.matchable.social.dto.UserPostCommentPageResponse;
@@ -14,9 +15,29 @@ import br.com.unify.matchable.user.entity.User;
 
 public interface SocialService {
 
+    /**
+     * Segue direto, ou — se o alvo aprova seguidores — cria um pedido pendente
+     * ({@code following=false, followRequested=true}). Idempotente.
+     */
     FollowActionResponse follow(User currentUser, UUID targetUserProfileId);
 
+    /** Deixa de seguir e cancela meu pedido pendente para o perfil. Idempotente. */
     FollowActionResponse unfollow(User currentUser, UUID targetUserProfileId);
+
+    /** Pedidos RECEBIDOS pendentes (mais recentes primeiro). */
+    FollowRequestPageResponse listFollowRequests(User currentUser, Integer page, Integer size);
+
+    /** Pedidos que EU enviei e ainda estão pendentes. */
+    FollowRequestPageResponse listSentFollowRequests(User currentUser, Integer page, Integer size);
+
+    /** Só o destinatário: quem pediu passa a seguir. */
+    void acceptFollowRequest(User currentUser, UUID requestId);
+
+    /** Destinatário recusa ou quem pediu cancela. 404 para terceiros. */
+    void deleteFollowRequest(User currentUser, UUID requestId);
+
+    /** Conta deixou de aprovar seguidores: todos os pedidos recebidos viram follow. */
+    void acceptAllPendingFollowRequests(User currentUser);
 
     FollowPageResponse listFollowing(User currentUser, Integer page, Integer size);
 

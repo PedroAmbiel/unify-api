@@ -8,20 +8,12 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import br.com.unify.matchable.chat.dto.ChatMediaPayload;
 import br.com.unify.matchable.chat.enums.ChatMessageType;
 import br.com.unify.matchable.common.image.OidImageService;
+import br.com.unify.matchable.common.media.AudioMediaValidator;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 @ApplicationScoped
 public class ChatMediaValidator {
-
-    private static final Set<String> ALLOWED_AUDIO_CONTENT_TYPES = Set.of(
-            "audio/m4a",
-            "audio/x-m4a",
-            "audio/mp4",
-            "audio/mpeg",
-            "audio/aac",
-            "audio/aacp"
-    );
 
     private static final Set<String> ALLOWED_IMAGE_CONTENT_TYPES = Set.of(
             "image/jpeg",
@@ -41,6 +33,9 @@ public class ChatMediaValidator {
 
     @Inject
     OidImageService oidImageService;
+
+    @Inject
+    AudioMediaValidator audioMediaValidator;
 
     /**
      * Valida e normaliza a mídia recebida no multipart.
@@ -68,9 +63,7 @@ public class ChatMediaValidator {
                     "O envio de vídeo ainda não está disponível. Envie uma imagem ou um áudio.");
         }
 
-        String normalizedContentType = contentType == null
-                ? ""
-                : contentType.trim().toLowerCase(Locale.ROOT).split(";")[0].trim();
+        String normalizedContentType = AudioMediaValidator.normalizeContentType(contentType);
 
         if (type == ChatMessageType.IMAGE) {
             return validateImage(normalizedContentType, bytes);
@@ -109,23 +102,11 @@ public class ChatMediaValidator {
     }
 
     private ChatMediaPayload validateAudio(String contentType, byte[] bytes, Integer durationSeconds) {
-        if (!ALLOWED_AUDIO_CONTENT_TYPES.contains(contentType)) {
-            throw new IllegalArgumentException(
-                    "Formato de áudio não suportado. Envie m4a, mp4, aac ou mpeg.");
-        }
-        if (bytes.length > maxAudioSizeBytes) {
-            throw new IllegalArgumentException(
-                    "O áudio excede o limite de " + (maxAudioSizeBytes / 1_048_576) + " MB");
-        }
-        if (durationSeconds != null && durationSeconds > maxAudioDurationSeconds) {
-            throw new IllegalArgumentException(
-                    "O áudio excede a duração máxima de " + maxAudioDurationSeconds + " segundos");
-        }
-        if (durationSeconds != null && durationSeconds < 1) {
-            throw new IllegalArgumentException("O áudio é muito curto para ser enviado");
-        }
+        // Regra compartilhada com o áudio de apresentação do perfil; no chat a duração é opcional.
+        AudioMediaValidator.ValidatedAudio audio = audioMediaValidator.validate(
+                contentType, bytes, durationSeconds, maxAudioSizeBytes, maxAudioDurationSeconds, false);
 
         // Áudio é gravado como veio: sem transcodificação, sem reencode.
-        return new ChatMediaPayload(ChatMessageType.AUDIO, bytes, contentType, durationSeconds);
+        return new ChatMediaPayload(ChatMessageType.AUDIO, audio.bytes(), audio.contentType(), audio.durationSeconds());
     }
 }

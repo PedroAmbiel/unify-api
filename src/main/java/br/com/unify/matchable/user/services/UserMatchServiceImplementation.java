@@ -43,6 +43,7 @@ import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserCoordinates;
 import br.com.unify.matchable.user.entity.UserMatchPreference;
 import br.com.unify.matchable.user.entity.UserPossibleMatch;
+import br.com.unify.matchable.user.entity.UserPrivacySettings;
 import br.com.unify.matchable.user.entity.UserProfile;
 import br.com.unify.matchable.user.entity.UserProfileImage;
 import br.com.unify.matchable.user.enums.SimilarityPreference;
@@ -1367,13 +1368,38 @@ public class UserMatchServiceImplementation implements UserMatchService {
                   and (up.fk_gender in (%s) or up.fk_gender = 4) -- Id 4 é "prefiro não informar": entra em consideração
                   %s
                   %s
+                  %s
                 """.formatted(
                 namedParameters("gender", desiredGenderIds.size()),
                 ageClause(minAge, maxAge),
-                decisionExclusionClause()
+                decisionExclusionClause(),
+                privacyExclusionClause()
         );
-        // semana 04: UserBlock pluga aqui (e no gêmeo filterVisibleProfileIds). São os DOIS
-        // únicos pontos que precisam conhecer a nova regra de exclusão.
+    }
+
+    /**
+     * Semana 04 — privacidade e bloqueio no discovery orgânico:
+     * <ul>
+     *   <li>{@code discoverable = false} tira o perfil do discovery dos outros. Sem linha em
+     *       user_privacy_settings vale o default (descobrível), por isso {@code not exists}
+     *       sobre o valor {@code false} e nunca inner join.</li>
+     *   <li>Bloqueio em qualquer direção, modelado por {@code users.id} (daí {@code u.id}).</li>
+     * </ul>
+     * O caminho inbound ({@link #filterVisibleProfileIds}) aplica só o bloqueio: quem ficou
+     * invisível mas já curtiu alguém continua podendo ser respondido.
+     */
+    private String privacyExclusionClause() {
+        return """
+                 and not exists (
+                     select 1 from user_privacy_settings ps
+                     where ps.fk_user = u.id and ps.discoverable = false
+                 )
+                 and not exists (
+                     select 1 from user_blocks ub
+                     where (ub.fk_blocker = :currentUserId and ub.fk_blocked = u.id)
+                        or (ub.fk_blocker = u.id and ub.fk_blocked = :currentUserId)
+                 )
+                """;
     }
 
     /**
@@ -1382,7 +1408,7 @@ public class UserMatchServiceImplementation implements UserMatchService {
      * O caminho de convites recebidos ({@link #collectPriorityInboundProfileIds}) não passa por
      * nenhuma das queries nativas: os ids vêm direto de user_possible_matches e são injetados no
      * feed por {@link #insertPriorityMatches}. Sem este método, qualquer regra de exclusão nova
-     * (hoje a carência, na semana 04 o UserBlock) valeria para o feed orgânico e não para os
+     * (a carência e, desde a semana 04, o UserBlock) valeria para o feed orgânico e não para os
      * convites — exatamente o furo que este método fecha.
      *
      * Uma única query: devolve os ids de {@code profileIds} que NÃO estão excluídos, preservando
@@ -1411,7 +1437,6 @@ public class UserMatchServiceImplementation implements UserMatchService {
         }
 
         // Mesma semântica de decisionExclusionClause(), em JPQL.
-        // semana 04: UserBlock pluga aqui (e no gêmeo commonCandidateFilters).
         Set<UUID> excluded = new LinkedHashSet<>(entityManager.createQuery(
                         "select case when m.starterProfile.id = :viewerId "
                                 + "then m.pendingProfile.id else m.starterProfile.id end "
@@ -1425,6 +1450,17 @@ public class UserMatchServiceImplementation implements UserMatchService {
                 .setParameter("viewerId", viewerProfile.id)
                 .setParameter("profileIds", candidates)
                 .setParameter("declineThreshold", declineThreshold())
+                .getResultList());
+
+        // Mesmo bloqueio de privacyExclusionClause() (sem o discoverable: ver o javadoc de lá).
+        excluded.addAll(entityManager.createQuery(
+                        "select p.id from UserProfile p, UserBlock b "
+                                + "where p.id in :profileIds "
+                                + "  and ((b.blocker.id = :viewerUserId and b.blocked.id = p.user.id) "
+                                + "    or (b.blocked.id = :viewerUserId and b.blocker.id = p.user.id))",
+                        UUID.class)
+                .setParameter("profileIds", candidates)
+                .setParameter("viewerUserId", viewerProfile.user.id)
                 .getResultList());
 
         return candidates.stream()
@@ -1466,6 +1502,7 @@ public class UserMatchServiceImplementation implements UserMatchService {
             Instant declineThreshold
     ) {
         query.setParameter("currentProfileId", currentProfile.id);
+        query.setParameter("currentUserId", currentProfile.user.id);
         query.setParameter("declineThreshold", OffsetDateTime.ofInstant(declineThreshold, ZoneOffset.UTC));
 
         for (int index = 0; index < desiredGenderIds.size(); index++) {
@@ -1598,7 +1635,8 @@ public class UserMatchServiceImplementation implements UserMatchService {
                 otherUser == null ? null : otherUser.id,
                 otherProfile == null ? null : otherProfile.id,
                 buildFullName(otherUser),
-                calculateAge(otherUser),
+                // Privacidade do outro: idade oculta sai nula (mesma regra do perfil público).
+                UserPrivacySettings.showsAge(otherUser) ? calculateAge(otherUser) : null,
                 activeProfilePicture == null ? null : toMatchImageResponse(activeProfilePicture)
         );
     }

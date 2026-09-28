@@ -21,6 +21,8 @@ import br.com.unify.matchable.post.entity.PostLike;
 import br.com.unify.matchable.post.enums.PostOrigin;
 import br.com.unify.matchable.social.dto.FollowActionResponse;
 import br.com.unify.matchable.social.dto.FollowPageResponse;
+import br.com.unify.matchable.social.dto.FollowRequestPageResponse;
+import br.com.unify.matchable.social.dto.FollowRequestResponse;
 import br.com.unify.matchable.social.dto.FollowStatsResponse;
 import br.com.unify.matchable.social.dto.FollowedProfileSummaryResponse;
 import br.com.unify.matchable.social.dto.UserFeedPageResponse;
@@ -31,10 +33,14 @@ import br.com.unify.matchable.social.dto.UserPostCommunityResponse;
 import br.com.unify.matchable.social.dto.UserPostLikeResponse;
 import br.com.unify.matchable.social.dto.UserPostResponse;
 import br.com.unify.matchable.social.entity.UserFollow;
+import br.com.unify.matchable.social.entity.UserFollowRequest;
 import br.com.unify.matchable.social.enums.FeedSource;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserProfile;
+import br.com.unify.matchable.user.entity.UserPrivacySettings;
 import br.com.unify.matchable.user.entity.UserProfileImage;
+import br.com.unify.matchable.user.enums.FeedVisibility;
+import br.com.unify.matchable.user.services.UserBlockService;
 import io.quarkus.hibernate.orm.panache.PanacheQuery;
 import io.quarkus.panache.common.Page;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -65,6 +71,8 @@ public class SocialServiceImplementation implements SocialService {
     static final String COMMENT_NOT_FOUND_MESSAGE = "Comentário não encontrado";
     static final String COMMENT_DELETE_FORBIDDEN_MESSAGE =
             "Só quem escreveu o comentário ou o autor da publicação pode excluí-lo";
+    static final String FOLLOW_BLOCKED_MESSAGE = "Não é possível seguir este usuário";
+    static final String FOLLOW_REQUEST_NOT_FOUND_MESSAGE = "Pedido para seguir não encontrado";
 
     static final int POST_BODY_MAX_LENGTH = 4000;
     static final int COMMENT_BODY_MAX_LENGTH = 2000;
@@ -85,6 +93,9 @@ public class SocialServiceImplementation implements SocialService {
     @Inject
     OidImageService oidImageService;
 
+    @Inject
+    UserBlockService userBlockService;
+
     // ------------------------------------------------------------- follow
 
     @Override
@@ -96,18 +107,31 @@ public class SocialServiceImplementation implements SocialService {
         if (followed.id.equals(follower.id)) {
             throw new IllegalArgumentException(SELF_FOLLOW_FORBIDDEN_MESSAGE);
         }
-
-        // Idempotente de propósito: a UI pode disparar toques repetidos; repetir "seguir" é seguro.
-        if (UserFollow.findPair(follower, followed) == null) {
-            UserFollow follow = new UserFollow();
-            follow.id = UUIDv7Generator.generate();
-            follow.follower = follower;
-            follow.followed = followed;
-            follow.createdAt = Instant.now();
-            follow.persist();
+        // O bloqueio já apagou os follows do par; isto impede recriar "por baixo" enquanto ele vale.
+        if (userBlockService.isBlockedEitherDirection(currentUser.id, followed.user.id)) {
+            throw new IllegalStateException(FOLLOW_BLOCKED_MESSAGE);
         }
 
-        return toActionResponse(follower, followed, true);
+        // Idempotente de propósito: a UI pode disparar toques repetidos; repetir "seguir" é seguro.
+        if (UserFollow.findPair(follower, followed) != null) {
+            return toActionResponse(follower, followed, true, false);
+        }
+
+        // Conta que aprova seguidores: vira pedido pendente até o dono aceitar.
+        if (UserPrivacySettings.requiresFollowApproval(followed.user)) {
+            if (UserFollowRequest.findPair(follower, followed) == null) {
+                UserFollowRequest request = new UserFollowRequest();
+                request.id = UUIDv7Generator.generate();
+                request.requester = follower;
+                request.target = followed;
+                request.createdAt = Instant.now();
+                request.persist();
+            }
+            return toActionResponse(follower, followed, false, true);
+        }
+
+        createFollow(follower, followed);
+        return toActionResponse(follower, followed, true, false);
     }
 
     @Override
@@ -120,8 +144,128 @@ public class SocialServiceImplementation implements SocialService {
         if (existing != null) {
             existing.delete();
         }
+        // "Deixar de seguir" também desiste de um pedido ainda não respondido.
+        UserFollowRequest pending = UserFollowRequest.findPair(follower, followed);
+        if (pending != null) {
+            pending.delete();
+        }
 
-        return toActionResponse(follower, followed, false);
+        return toActionResponse(follower, followed, false, false);
+    }
+
+    // ------------------------------------------------------ pedidos para seguir
+
+    @Override
+    public FollowRequestPageResponse listFollowRequests(User currentUser, Integer page, Integer size) {
+        UserProfile me = requireUserProfile(currentUser);
+        return toRequestPage(UserFollowRequest.queryReceived(me), true, page, size);
+    }
+
+    @Override
+    public FollowRequestPageResponse listSentFollowRequests(User currentUser, Integer page, Integer size) {
+        UserProfile me = requireUserProfile(currentUser);
+        return toRequestPage(UserFollowRequest.querySent(me), false, page, size);
+    }
+
+    @Override
+    @Transactional
+    public void acceptFollowRequest(User currentUser, UUID requestId) {
+        UserProfile me = requireUserProfile(currentUser);
+        UserFollowRequest request = requireFollowRequest(requestId);
+        // Só o destinatário aceita; para os outros o pedido "não existe".
+        if (!request.target.id.equals(me.id)) {
+            throw new NoSuchElementException(FOLLOW_REQUEST_NOT_FOUND_MESSAGE);
+        }
+
+        UserProfile requester = request.requester;
+        request.delete();
+        if (UserFollow.findPair(requester, me) == null) {
+            createFollow(requester, me);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void deleteFollowRequest(User currentUser, UUID requestId) {
+        UserProfile me = requireUserProfile(currentUser);
+        UserFollowRequest request = requireFollowRequest(requestId);
+        boolean recipient = request.target.id.equals(me.id);
+        boolean requester = request.requester.id.equals(me.id);
+        if (!recipient && !requester) {
+            throw new NoSuchElementException(FOLLOW_REQUEST_NOT_FOUND_MESSAGE);
+        }
+        request.delete();
+    }
+
+    @Override
+    @Transactional
+    public void acceptAllPendingFollowRequests(User currentUser) {
+        UserProfile me = resolveUserProfile(currentUser);
+        if (me == null) {
+            return;
+        }
+        for (UserFollowRequest request : UserFollowRequest.queryReceived(me).<UserFollowRequest>list()) {
+            UserProfile requester = request.requester;
+            request.delete();
+            if (UserFollow.findPair(requester, me) == null) {
+                createFollow(requester, me);
+            }
+        }
+    }
+
+    private void createFollow(UserProfile follower, UserProfile followed) {
+        UserFollow follow = new UserFollow();
+        follow.id = UUIDv7Generator.generate();
+        follow.follower = follower;
+        follow.followed = followed;
+        follow.createdAt = Instant.now();
+        follow.persist();
+    }
+
+    private UserFollowRequest requireFollowRequest(UUID requestId) {
+        if (requestId == null) {
+            throw new IllegalArgumentException(FOLLOW_REQUEST_NOT_FOUND_MESSAGE);
+        }
+        UserFollowRequest request = UserFollowRequest.findById(requestId);
+        if (request == null) {
+            throw new NoSuchElementException(FOLLOW_REQUEST_NOT_FOUND_MESSAGE);
+        }
+        return request;
+    }
+
+    private FollowRequestPageResponse toRequestPage(
+            PanacheQuery<UserFollowRequest> query,
+            boolean received,
+            Integer page,
+            Integer size
+    ) {
+        int resolvedPage = PageParams.resolvePage(page);
+        int resolvedSize = PageParams.resolveSize(size);
+        long total = query.count();
+        List<FollowRequestResponse> requests = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
+                .map(request -> {
+                    // A outra pessoa: quem pediu (recebidos) ou quem eu pedi para seguir (enviados).
+                    UserProfile other = received ? request.requester : request.target;
+                    return new FollowRequestResponse(
+                            request.id,
+                            other.id,
+                            other.user.id,
+                            buildDisplayName(other.user),
+                            resolveAvatarUrl(other),
+                            request.createdAt
+                    );
+                })
+                .toList();
+
+        PageResponse<FollowRequestResponse> envelope = PageResponse.of(requests, resolvedPage, resolvedSize, total);
+        return new FollowRequestPageResponse(
+                envelope.content(),
+                envelope.page(),
+                envelope.size(),
+                envelope.totalElements(),
+                envelope.totalPages(),
+                envelope.hasNext()
+        );
     }
 
     @Override
@@ -133,7 +277,7 @@ public class SocialServiceImplementation implements SocialService {
         PanacheQuery<UserFollow> query = UserFollow.queryFollowing(me);
         long total = query.count();
         List<FollowedProfileSummaryResponse> profiles = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
-                .map(follow -> toSummary(follow.followed, true))
+                .map(follow -> toSummary(follow.followed, true, false))
                 .toList();
 
         return toFollowPage(profiles, resolvedPage, resolvedSize, total);
@@ -148,7 +292,11 @@ public class SocialServiceImplementation implements SocialService {
         PanacheQuery<UserFollow> query = UserFollow.queryFollowers(me);
         long total = query.count();
         List<FollowedProfileSummaryResponse> profiles = query.page(Page.of(resolvedPage, resolvedSize)).list().stream()
-                .map(follow -> toSummary(follow.follower, UserFollow.findPair(me, follow.follower) != null))
+                .map(follow -> toSummary(
+                        follow.follower,
+                        UserFollow.findPair(me, follow.follower) != null,
+                        UserFollowRequest.findPair(me, follow.follower) != null
+                ))
                 .toList();
 
         return toFollowPage(profiles, resolvedPage, resolvedSize, total);
@@ -157,16 +305,25 @@ public class SocialServiceImplementation implements SocialService {
     @Override
     public FollowStatsResponse getFollowStats(User currentUser, UUID userProfileId) {
         UserProfile target = requireTargetProfile(userProfileId);
+        ensureNotBlocked(currentUser, target.user);
         UserProfile me = resolveUserProfile(currentUser);
+        boolean ownProfile = me != null && me.id.equals(target.id);
         boolean followedByCurrentUser = me != null
-                && !me.id.equals(target.id)
+                && !ownProfile
                 && UserFollow.findPair(me, target) != null;
+        boolean followRequestedByCurrentUser = me != null
+                && !ownProfile
+                && !followedByCurrentUser
+                && UserFollowRequest.findPair(me, target) != null;
 
         return new FollowStatsResponse(
                 target.id,
                 UserFollow.countFollowers(target),
                 UserFollow.countFollowing(target),
-                followedByCurrentUser
+                followedByCurrentUser,
+                followRequestedByCurrentUser,
+                UserPrivacySettings.requiresFollowApproval(target.user),
+                ownProfile ? UserFollowRequest.countReceived(target) : null
         );
     }
 
@@ -265,13 +422,13 @@ public class SocialServiceImplementation implements SocialService {
     }
 
     /**
-     * Autores que nunca devem aparecer no feed de {@code viewer}. Hoje ninguém:
-     * todos os perfis são públicos. Semana 04 (bloqueio / perfil privado)
-     * pluga aqui — ponto único, junto de
-     * {@link HomeFeedRankingPolicy#authorVisibilityFilter()}.
+     * Autores que nunca devem aparecer no feed de {@code viewer}: bloqueados em
+     * qualquer direção (vale para posts pessoais E de comunidade). A outra
+     * metade da regra — {@code feedVisibility = FOLLOWERS_ONLY} — fica no SQL,
+     * em {@link HomeFeedRankingPolicy#authorVisibilityFilter()}.
      */
     private List<UUID> hiddenAuthorUserIds(User viewer) {
-        return List.of();
+        return List.copyOf(userBlockService.relatedUserIds(viewer.id));
     }
 
     // ------------------------------------------------------ likes / comments
@@ -280,7 +437,7 @@ public class SocialServiceImplementation implements SocialService {
     @Transactional
     public UserPostLikeResponse likePost(User currentUser, UUID postId) {
         requireUserProfile(currentUser);
-        Post post = requireActivePersonalPost(postId);
+        Post post = requireVisiblePersonalPost(currentUser, postId);
 
         // Idempotente: toques repetidos não duplicam a curtida.
         if (PostLike.findByPostAndUser(post, currentUser) == null) {
@@ -299,7 +456,7 @@ public class SocialServiceImplementation implements SocialService {
     @Transactional
     public UserPostLikeResponse unlikePost(User currentUser, UUID postId) {
         requireUserProfile(currentUser);
-        Post post = requireActivePersonalPost(postId);
+        Post post = requireVisiblePersonalPost(currentUser, postId);
 
         PostLike existing = PostLike.findByPostAndUser(post, currentUser);
         if (existing != null) {
@@ -311,7 +468,7 @@ public class SocialServiceImplementation implements SocialService {
 
     @Override
     public UserPostCommentPageResponse getComments(User currentUser, UUID postId, Integer page, Integer size) {
-        Post post = requireActivePersonalPost(postId);
+        Post post = requireVisiblePersonalPost(currentUser, postId);
         int resolvedPage = PageParams.resolvePage(page);
         int resolvedSize = PageParams.resolveSize(size);
 
@@ -335,7 +492,7 @@ public class SocialServiceImplementation implements SocialService {
     @Transactional
     public UserPostCommentResponse createComment(User currentUser, UUID postId, String body) {
         requireUserProfile(currentUser);
-        Post post = requireActivePersonalPost(postId);
+        Post post = requireVisiblePersonalPost(currentUser, postId);
 
         PostComment comment = new PostComment();
         comment.id = UUIDv7Generator.generate();
@@ -351,7 +508,7 @@ public class SocialServiceImplementation implements SocialService {
     @Override
     @Transactional
     public void deleteComment(User currentUser, UUID postId, UUID commentId) {
-        Post post = requireActivePersonalPost(postId);
+        Post post = requireVisiblePersonalPost(currentUser, postId);
 
         if (commentId == null) {
             throw new IllegalArgumentException(COMMENT_NOT_FOUND_MESSAGE);
@@ -372,7 +529,7 @@ public class SocialServiceImplementation implements SocialService {
 
     @Override
     public byte[] getPostMedia(User currentUser, UUID postId) {
-        Post post = requireActivePersonalPost(postId);
+        Post post = requireVisiblePersonalPost(currentUser, postId);
         if (post.mediaOid == null) {
             throw new NoSuchElementException(POST_MEDIA_NOT_FOUND_MESSAGE);
         }
@@ -385,7 +542,60 @@ public class SocialServiceImplementation implements SocialService {
         int resolvedPage = PageParams.resolvePage(page);
         int resolvedSize = PageParams.resolveSize(size);
 
+        // Bloqueio = 404 (não revela que o bloqueio existe); só-seguidores = página vazia com
+        // visible=false, para o app dizer "posts privados" em vez de "nenhuma publicação".
+        ensureNotBlocked(currentUser, target.user);
+        if (!canSeeRestrictedPostsOf(currentUser, target.user)) {
+            return UserFeedPageResponse.hidden(resolvedPage, resolvedSize);
+        }
+
         return toFeedPage(Post.queryPersonalByAuthor(target.user), currentUser, resolvedPage, resolvedSize);
+    }
+
+    // --------------------------------------------------------- visibilidade
+
+    /**
+     * PONTO ÚNICO de visibilidade de post pessoal fora do feed (curtir,
+     * comentar, listar comentários, baixar mídia). Mesma regra de
+     * {@link #listPostsByProfile} e do SQL do feed: bloqueio em qualquer
+     * direção, ou só-seguidores sem seguir, dá 404 genérico, igual a post
+     * inexistente.
+     */
+    private Post requireVisiblePersonalPost(User viewer, UUID postId) {
+        Post post = requireActivePersonalPost(postId);
+        if (isBlocked(viewer, post.author) || !canSeeRestrictedPostsOf(viewer, post.author)) {
+            throw new NoSuchElementException(POST_NOT_FOUND_MESSAGE);
+        }
+        return post;
+    }
+
+    private void ensureNotBlocked(User viewer, User owner) {
+        if (isBlocked(viewer, owner)) {
+            throw new NoSuchElementException(TARGET_PROFILE_NOT_FOUND_MESSAGE);
+        }
+    }
+
+    private boolean isBlocked(User viewer, User owner) {
+        return viewer != null && owner != null
+                && !viewer.id.equals(owner.id)
+                && userBlockService.isBlockedEitherDirection(viewer.id, owner.id);
+    }
+
+    /**
+     * O próprio autor sempre vê; {@code FOLLOWERS_ONLY} ou conta privada exigem seguir o
+     * autor (pedido pendente não conta).
+     */
+    private boolean canSeeRestrictedPostsOf(User viewer, User author) {
+        if (viewer != null && viewer.id.equals(author.id)) {
+            return true;
+        }
+        if (!UserPrivacySettings.restrictsPostsToFollowers(author)) {
+            return true;
+        }
+        UserProfile viewerProfile = resolveUserProfile(viewer);
+        UserProfile authorProfile = UserProfile.findByUser(author);
+        return viewerProfile != null && authorProfile != null
+                && UserFollow.findPair(viewerProfile, authorProfile) != null;
     }
 
     // ------------------------------------------------------------ helpers
@@ -440,10 +650,16 @@ public class SocialServiceImplementation implements SocialService {
         );
     }
 
-    private FollowActionResponse toActionResponse(UserProfile follower, UserProfile followed, boolean following) {
+    private FollowActionResponse toActionResponse(
+            UserProfile follower,
+            UserProfile followed,
+            boolean following,
+            boolean followRequested
+    ) {
         return new FollowActionResponse(
                 followed.id,
                 following,
+                followRequested,
                 UserFollow.countFollowers(followed),
                 UserFollow.countFollowing(follower)
         );
@@ -521,13 +737,18 @@ public class SocialServiceImplementation implements SocialService {
         );
     }
 
-    private FollowedProfileSummaryResponse toSummary(UserProfile profile, boolean followedByCurrentUser) {
+    private FollowedProfileSummaryResponse toSummary(
+            UserProfile profile,
+            boolean followedByCurrentUser,
+            boolean followRequestedByCurrentUser
+    ) {
         return new FollowedProfileSummaryResponse(
                 profile.id,
                 profile.user.id,
                 buildDisplayName(profile.user),
                 resolveAvatarUrl(profile),
-                followedByCurrentUser
+                followedByCurrentUser,
+                followRequestedByCurrentUser
         );
     }
 

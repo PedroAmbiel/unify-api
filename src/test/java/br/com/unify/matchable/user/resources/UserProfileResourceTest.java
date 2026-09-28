@@ -16,12 +16,16 @@ import org.junit.jupiter.api.Test;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 
 import br.com.unify.matchable.common.dto.ErrorResponse;
+import br.com.unify.matchable.common.media.AudioContent;
 import br.com.unify.matchable.user.dto.DisabilityOptionResponse;
 import br.com.unify.matchable.user.dto.LocationRequest;
 import br.com.unify.matchable.user.dto.LookupOptionResponse;
 import br.com.unify.matchable.user.dto.ProfileCompletionResponse;
 import br.com.unify.matchable.user.dto.ProfileOptionsResponse;
 import br.com.unify.matchable.user.dto.SimilarityOptionResponse;
+import br.com.unify.matchable.user.dto.UserProfileAudioPublicResponse;
+import br.com.unify.matchable.user.dto.UserProfileAudioResponse;
+import br.com.unify.matchable.user.dto.UserProfileAudioStatusResponse;
 import br.com.unify.matchable.user.dto.UserPublicProfileGalleryImagesResponse;
 import br.com.unify.matchable.user.dto.UserPublicProfileResponse;
 import br.com.unify.matchable.user.dto.UserProfileImageResponse;
@@ -82,7 +86,8 @@ class UserProfileResourceTest {
                 List.of(new LookupOptionResponse(1, "Tecnologia")),
                 null,
                 null,
-                List.of()
+                List.of(),
+                null
         );
 
         TestableUserProfileResource resource = new TestableUserProfileResource();
@@ -263,6 +268,7 @@ class UserProfileResourceTest {
                 userProfileId,
                 "Larissa",
                 28,
+                4.2,
                 "Adoro conversar sobre livros e tecnologia assistiva",
                 new LookupOptionResponse(1, "Mulher"),
                 new LookupOptionResponse(2, "Ela/Dela"),
@@ -274,7 +280,12 @@ class UserProfileResourceTest {
                 List.of(new LookupOptionResponse(2, "Tempo de qualidade")),
                 new LookupOptionResponse(1, "Moderada"),
                 List.of(new LookupOptionResponse(1, "Tecnologia")),
-                List.of(firstGalleryImageId, secondGalleryImageId)
+                List.of(firstGalleryImageId, secondGalleryImageId),
+                new UserProfileAudioPublicResponse(UUID.randomUUID(), 42),
+                List.of("GENDER"),
+                false,
+                UUID.randomUUID(),
+                null
         );
 
         TestableUserProfileResource resource = new TestableUserProfileResource();
@@ -285,9 +296,14 @@ class UserProfileResourceTest {
 
         assertEquals(200, response.getStatus());
         assertEquals(userProfileId, service.capturedPublicProfileId);
+        // O viewer precisa chegar ao service: é ele que decide bloqueio e distância.
+        assertSame(resource.currentUser, service.capturedUser);
         UserPublicProfileResponse body = assertInstanceOf(UserPublicProfileResponse.class, response.getEntity());
         assertEquals("Larissa", body.name());
         assertEquals(28, body.age());
+        assertEquals(4.2, body.distanceKm());
+        assertEquals(42, body.presentationAudio().durationSeconds());
+        assertEquals(List.of("GENDER"), body.hiddenFields());
         assertEquals(List.of("Tecnologia"), body.interestTypes().stream().map(LookupOptionResponse::description).toList());
         assertEquals(List.of(firstGalleryImageId, secondGalleryImageId), body.galleryImageIds());
     }
@@ -460,6 +476,108 @@ class UserProfileResourceTest {
     }
 
     @Test
+    void getPresentationAudioWrapsNullWhenThereIsNoAudio() {
+        StubUserProfileService service = new StubUserProfileService();
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getPresentationAudio();
+
+        assertEquals(200, response.getStatus());
+        UserProfileAudioStatusResponse body = assertInstanceOf(UserProfileAudioStatusResponse.class, response.getEntity());
+        assertNull(body.audio());
+    }
+
+    @Test
+    void uploadPresentationAudioPassesBytesAndDurationToService() {
+        StubUserProfileService service = new StubUserProfileService();
+        UUID audioId = UUID.randomUUID();
+        service.audioResponse = new UserProfileAudioResponse(
+                audioId, 30, "audio/m4a", 3L, java.time.Instant.now(), "/users/me/profile/audio/" + audioId);
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+        resource.nextUploadedBytes = new byte[] { 1, 2, 3 };
+
+        Response response = resource.uploadPresentationAudio(null, 30);
+
+        assertEquals(200, response.getStatus());
+        assertArrayEquals(new byte[] { 1, 2, 3 }, service.capturedAudioBytes);
+        assertEquals(30, service.capturedAudioDuration);
+        assertSame(service.audioResponse, response.getEntity());
+    }
+
+    @Test
+    void uploadPresentationAudioReturnsValidationErrorForInvalidAudio() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.audioException = new IllegalArgumentException("Informe a duração do áudio em segundos");
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+        resource.nextUploadedBytes = new byte[] { 1 };
+
+        Response response = resource.uploadPresentationAudio(null, null);
+
+        assertEquals(400, response.getStatus());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getEntity());
+        assertEquals("VALIDATION_INVALID_FORMAT", body.error());
+    }
+
+    @Test
+    void deletePresentationAudioReturnsNoContentOrNotFound() {
+        StubUserProfileService service = new StubUserProfileService();
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        assertEquals(204, resource.deletePresentationAudio().getStatus());
+
+        service.audioException = new NoSuchElementException("Áudio de apresentação não encontrado");
+        assertEquals(404, resource.deletePresentationAudio().getStatus());
+    }
+
+    @Test
+    void getPublicPresentationAudioKeepsStoredContentTypeAndPassesViewer() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.audioContent = new AudioContent(new byte[] { 7, 8 }, "audio/mp4");
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+        UUID userProfileId = UUID.randomUUID();
+        UUID audioId = UUID.randomUUID();
+
+        Response response = resource.getPublicPresentationAudioContent(userProfileId, audioId);
+
+        assertEquals(200, response.getStatus());
+        assertEquals("audio/mp4", response.getMediaType().toString());
+        assertArrayEquals(new byte[] { 7, 8 }, assertInstanceOf(byte[].class, response.getEntity()));
+        assertSame(resource.currentUser, service.capturedUser);
+        assertEquals(userProfileId, service.capturedPublicProfileId);
+        assertEquals(audioId, service.capturedAudioId);
+    }
+
+    @Test
+    void getPublicPresentationAudioReturnsJsonNotFoundWhenGuardRejects() {
+        StubUserProfileService service = new StubUserProfileService();
+        service.audioException = new NoSuchElementException("Perfil público não encontrado");
+
+        TestableUserProfileResource resource = new TestableUserProfileResource();
+        resource.userProfileService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getPublicPresentationAudioContent(UUID.randomUUID(), UUID.randomUUID());
+
+        assertEquals(404, response.getStatus());
+        assertEquals("application/json", response.getMediaType().toString());
+        assertInstanceOf(ErrorResponse.class, response.getEntity());
+    }
+
+    @Test
     void getProfileImageReturnsStoredBytes() {
         StubUserProfileService service = new StubUserProfileService();
         service.imageContent = new byte[] { 4, 5, 6 };
@@ -497,6 +615,11 @@ class UserProfileResourceTest {
         protected byte[] readUploadedBytes(FileUpload image) {
             return nextUploadedBytes;
         }
+
+        @Override
+        protected byte[] readUploadedAudioBytes(FileUpload audio) {
+            return nextUploadedBytes;
+        }
     }
 
     private static final class StubUserProfileService implements UserProfileService {
@@ -525,6 +648,13 @@ class UserProfileResourceTest {
         private NoSuchElementException publicProfileNotFound;
         private NoSuchElementException publicGalleryImagesNotFound;
         private NoSuchElementException publicGalleryImageNotFound;
+        private UserProfileAudioResponse audioResponse;
+        private AudioContent audioContent;
+        private String capturedAudioContentType;
+        private byte[] capturedAudioBytes;
+        private Integer capturedAudioDuration;
+        private UUID capturedAudioId;
+        private RuntimeException audioException;
 
         @Override
         public UserProfileResponse getProfile(User user) {
@@ -583,7 +713,8 @@ class UserProfileResourceTest {
         }
 
         @Override
-        public UserPublicProfileResponse getPublicProfile(UUID userProfileId) {
+        public UserPublicProfileResponse getPublicProfile(User viewer, UUID userProfileId) {
+            this.capturedUser = viewer;
             this.capturedPublicProfileId = userProfileId;
             if (publicProfileException != null) {
                 throw publicProfileException;
@@ -595,7 +726,8 @@ class UserProfileResourceTest {
         }
 
         @Override
-        public UserPublicProfileGalleryImagesResponse getPublicGalleryImages(UUID userProfileId) {
+        public UserPublicProfileGalleryImagesResponse getPublicGalleryImages(User viewer, UUID userProfileId) {
+            this.capturedUser = viewer;
             this.capturedPublicProfileId = userProfileId;
             if (publicGalleryImagesException != null) {
                 throw publicGalleryImagesException;
@@ -607,7 +739,8 @@ class UserProfileResourceTest {
         }
 
         @Override
-        public byte[] getPublicGalleryImageContent(UUID userProfileId, UUID imageId) {
+        public byte[] getPublicGalleryImageContent(User viewer, UUID userProfileId, UUID imageId) {
+            this.capturedUser = viewer;
             this.capturedPublicProfileId = userProfileId;
             this.capturedPublicGalleryImageId = imageId;
             if (publicGalleryImageException != null) {
@@ -663,6 +796,54 @@ class UserProfileResourceTest {
                 throw imageNotFound;
             }
             return imageContent;
+        }
+
+        @Override
+        public UserProfileAudioStatusResponse getPresentationAudio(User user) {
+            this.capturedUser = user;
+            return new UserProfileAudioStatusResponse(audioResponse);
+        }
+
+        @Override
+        public UserProfileAudioResponse uploadPresentationAudio(
+                User user, String contentType, byte[] bytes, Integer durationSeconds) {
+            this.capturedUser = user;
+            this.capturedAudioContentType = contentType;
+            this.capturedAudioBytes = bytes;
+            this.capturedAudioDuration = durationSeconds;
+            if (audioException != null) {
+                throw audioException;
+            }
+            return audioResponse;
+        }
+
+        @Override
+        public void deletePresentationAudio(User user) {
+            this.capturedUser = user;
+            if (audioException != null) {
+                throw audioException;
+            }
+        }
+
+        @Override
+        public AudioContent getPresentationAudioContent(User user, UUID audioId) {
+            this.capturedUser = user;
+            this.capturedAudioId = audioId;
+            if (audioException != null) {
+                throw audioException;
+            }
+            return audioContent;
+        }
+
+        @Override
+        public AudioContent getPublicPresentationAudioContent(User viewer, UUID userProfileId, UUID audioId) {
+            this.capturedUser = viewer;
+            this.capturedPublicProfileId = userProfileId;
+            this.capturedAudioId = audioId;
+            if (audioException != null) {
+                throw audioException;
+            }
+            return audioContent;
         }
     }
 }

@@ -10,7 +10,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
 /**
- * Monta respostas de imagem com ETag e Cache-Control.
+ * Monta respostas de imagem (e outras mídias imutáveis) com ETag e Cache-Control.
  *
  * As imagens sao imutaveis: uma nova foto gera um novo id. Por isso o
  * max-age e longo e o cache e `private` (o conteudo e protegido por JWT
@@ -24,6 +24,16 @@ public final class ImageResponses {
     }
 
     public static Response jpeg(byte[] content, Request request) {
+        return binary(content, "image/jpeg", request);
+    }
+
+    /**
+     * Mesma política de cache para qualquer mídia imutável (ex.: áudio de
+     * apresentação, cujo id muda a cada substituição). O {@code type} é
+     * explícito: com um {@code @Produces} curinga o RESTEasy Reactive
+     * devolveria application/octet-stream.
+     */
+    public static Response binary(byte[] content, String contentType, Request request) {
         if (content == null || content.length == 0) {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
@@ -39,7 +49,7 @@ public final class ImageResponses {
         }
 
         return Response.ok(content)
-                .type("image/jpeg")
+                .type(contentType)
                 .tag(entityTag)
                 .cacheControl(cacheControl())
                 .build();

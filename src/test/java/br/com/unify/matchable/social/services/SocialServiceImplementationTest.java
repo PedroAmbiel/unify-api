@@ -38,7 +38,10 @@ import br.com.unify.matchable.social.entity.UserFollow;
 import br.com.unify.matchable.social.enums.FeedSource;
 import br.com.unify.matchable.user.entity.InterestType;
 import br.com.unify.matchable.user.entity.User;
+import br.com.unify.matchable.user.entity.UserBlock;
+import br.com.unify.matchable.user.entity.UserPrivacySettings;
 import br.com.unify.matchable.user.entity.UserProfile;
+import br.com.unify.matchable.user.enums.FeedVisibility;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -456,6 +459,101 @@ class SocialServiceImplementationTest {
 
         UserFeedPageResponse betoPosts = service.listPostsByProfile(ana.user, beto.profile.id, 0, 10);
         assertEquals(List.of("beto 3", "beto 2", "beto 1"), betoPosts.posts().stream().map(UserPostResponse::body).toList());
+    }
+
+    // ------------------------------------------- privacidade e bloqueio (semana 04)
+
+    @Test
+    @TestTransaction
+    void listPostsByProfile_followersOnly_escondeDeQuemNaoSegue() {
+        Fixture ana = fixture("Ana");
+        Fixture beto = fixture("Beto");
+        Fixture caio = fixture("Caio");
+        service.createPost(beto.user, "só para seguidores", null);
+        restrictToFollowers(beto.user);
+        service.follow(caio.user, beto.profile.id);
+
+        UserFeedPageResponse asStranger = service.listPostsByProfile(ana.user, beto.profile.id, 0, 10);
+        assertFalse(asStranger.visible());
+        assertTrue(asStranger.posts().isEmpty());
+
+        UserFeedPageResponse asFollower = service.listPostsByProfile(caio.user, beto.profile.id, 0, 10);
+        assertTrue(asFollower.visible());
+        assertEquals(1, asFollower.posts().size());
+
+        UserFeedPageResponse asAuthor = service.listPostsByProfile(beto.user, beto.profile.id, 0, 10);
+        assertTrue(asAuthor.visible(), "o autor sempre vê os próprios posts");
+        assertEquals(1, asAuthor.posts().size());
+    }
+
+    @Test
+    @TestTransaction
+    void interacoes_devolvem404_paraPostRestritoOuDeBloqueado() {
+        Fixture ana = fixture("Ana");
+        Fixture beto = fixture("Beto");
+        Fixture caio = fixture("Caio");
+        UserPostResponse restrito = service.createPost(beto.user, "restrito", null);
+        restrictToFollowers(beto.user);
+        UserPostResponse doCaio = service.createPost(caio.user, "público", null);
+        block(caio.user, ana.user);
+
+        assertThrows(NoSuchElementException.class, () -> service.likePost(ana.user, restrito.id()));
+        assertThrows(NoSuchElementException.class, () -> service.createComment(ana.user, restrito.id(), "oi"));
+        assertThrows(NoSuchElementException.class, () -> service.getComments(ana.user, restrito.id(), 0, 10));
+
+        // Bloqueio vale nos dois sentidos: Caio bloqueou Ana.
+        assertThrows(NoSuchElementException.class, () -> service.likePost(ana.user, doCaio.id()));
+        assertThrows(NoSuchElementException.class, () -> service.listPostsByProfile(ana.user, caio.profile.id, 0, 10));
+        assertThrows(NoSuchElementException.class, () -> service.getFollowStats(ana.user, caio.profile.id));
+        IllegalStateException follow = assertThrows(
+                IllegalStateException.class, () -> service.follow(ana.user, caio.profile.id));
+        assertEquals(SocialServiceImplementation.FOLLOW_BLOCKED_MESSAGE, follow.getMessage());
+
+        // Seguindo o autor restrito, a interação volta a funcionar.
+        service.follow(ana.user, beto.profile.id);
+        assertTrue(service.likePost(ana.user, restrito.id()).likedByCurrentUser());
+    }
+
+    @Test
+    @TestTransaction
+    void getFeed_excluiBloqueadosERestritosNaoSeguidos() {
+        Fixture ana = fixture("Ana");
+        Fixture beto = fixture("Beto");
+        Fixture caio = fixture("Caio");
+        Fixture dora = fixture("Dora");
+        UserPostResponse doBeto = service.createPost(beto.user, "de quem me bloqueou", null);
+        UserPostResponse doCaio = service.createPost(caio.user, "restrito a seguidores", null);
+        UserPostResponse daDora = service.createPost(dora.user, "público", null);
+        block(beto.user, ana.user);
+        restrictToFollowers(caio.user);
+
+        List<UUID> ids = service.getFeed(ana.user, 0, 50).posts().stream().map(UserPostResponse::id).toList();
+        assertFalse(ids.contains(doBeto.id()), "bloqueio em qualquer direção some do feed");
+        assertFalse(ids.contains(doCaio.id()), "FOLLOWERS_ONLY não entra como sugestão");
+        assertTrue(ids.contains(daDora.id()), "controle positivo: perfil público entra como sugestão");
+
+        service.follow(ana.user, caio.profile.id);
+        List<UUID> afterFollow = service.getFeed(ana.user, 0, 50).posts().stream().map(UserPostResponse::id).toList();
+        assertTrue(afterFollow.contains(doCaio.id()), "seguindo, o post restrito aparece");
+    }
+
+    private static void restrictToFollowers(User user) {
+        UserPrivacySettings settings = new UserPrivacySettings();
+        settings.id = UUIDv7Generator.generate();
+        settings.user = user;
+        settings.feedVisibility = FeedVisibility.FOLLOWERS_ONLY;
+        settings.updatedAt = Instant.now();
+        // O feed é SQL nativo: garante que a linha já está no banco.
+        settings.persistAndFlush();
+    }
+
+    private static void block(User blocker, User blocked) {
+        UserBlock block = new UserBlock();
+        block.id = UUIDv7Generator.generate();
+        block.blocker = blocker;
+        block.blocked = blocked;
+        block.createdAt = Instant.now();
+        block.persistAndFlush();
     }
 
     // ------------------------------------------------------------ fixtures

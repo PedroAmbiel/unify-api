@@ -1,16 +1,24 @@
 package br.com.unify.matchable.user.services;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.Period;
+import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.UUID;
 
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
 import br.com.unify.matchable.common.UUIDv7Generator;
+import br.com.unify.matchable.common.geo.GeoUtils;
 import br.com.unify.matchable.common.image.OidImageService;
+import br.com.unify.matchable.common.media.AudioContent;
+import br.com.unify.matchable.common.media.AudioMediaValidator;
 import br.com.unify.matchable.user.dto.DisabilityOptionResponse;
 import br.com.unify.matchable.user.dto.LocationRequest;
 import br.com.unify.matchable.user.dto.LocationResponse;
@@ -18,6 +26,9 @@ import br.com.unify.matchable.user.dto.LookupOptionResponse;
 import br.com.unify.matchable.user.dto.ProfileCompletionResponse;
 import br.com.unify.matchable.user.dto.ProfileOptionsResponse;
 import br.com.unify.matchable.user.dto.SimilarityOptionResponse;
+import br.com.unify.matchable.user.dto.UserProfileAudioPublicResponse;
+import br.com.unify.matchable.user.dto.UserProfileAudioResponse;
+import br.com.unify.matchable.user.dto.UserProfileAudioStatusResponse;
 import br.com.unify.matchable.user.dto.UserPublicProfileGalleryImagesResponse;
 import br.com.unify.matchable.user.dto.UserPublicProfileResponse;
 import br.com.unify.matchable.user.dto.UserProfileImageResponse;
@@ -40,8 +51,15 @@ import br.com.unify.matchable.user.entity.Pronoun;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserCoordinates;
 import br.com.unify.matchable.user.entity.UserMatchPreference;
+import br.com.unify.matchable.user.entity.UserPossibleMatch;
+import br.com.unify.matchable.user.entity.UserPrivacySettings;
 import br.com.unify.matchable.user.entity.UserProfile;
+import br.com.unify.matchable.user.entity.UserProfileAudio;
+import br.com.unify.matchable.user.entity.UserProfileFieldVisibility;
 import br.com.unify.matchable.user.entity.UserProfileImage;
+import br.com.unify.matchable.social.entity.UserFollow;
+import br.com.unify.matchable.user.enums.ProfileField;
+import br.com.unify.matchable.user.enums.ProfileFieldVisibility;
 import br.com.unify.matchable.user.enums.SimilarityPreference;
 import io.quarkus.panache.common.Sort;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -58,6 +76,11 @@ public class UserProfileServiceImplementation implements UserProfileService {
     private static final String PUBLIC_PROFILE_NOT_FOUND_MESSAGE = "Perfil público não encontrado";
     private static final String PUBLIC_GALLERY_IMAGE_NOT_FOUND_MESSAGE = "Imagem pública não encontrada";
     private static final String IMAGE_DOWNLOAD_URL_PREFIX = "/users/me/profile/images/";
+    static final String AUDIO_DOWNLOAD_URL_PREFIX = "/users/me/profile/audio/";
+    /** Mesmo endpoint de avatar já usado pelos DTOs sociais (SocialServiceImplementation). */
+    static final String PUBLIC_AVATAR_URL_PREFIX = "/communities/users/";
+    static final String PUBLIC_AVATAR_URL_SUFFIX = "/avatar";
+    static final String AUDIO_NOT_FOUND_MESSAGE = "Áudio de apresentação não encontrado";
 
     private static final String GENDER_FIELD = "gênero";
     private static final String PRONOUNS_FIELD = "pronomes";
@@ -77,6 +100,19 @@ public class UserProfileServiceImplementation implements UserProfileService {
 
     @Inject
     OidImageService oidImageService;
+
+    @Inject
+    UserBlockService userBlockService;
+
+    @Inject
+    AudioMediaValidator audioMediaValidator;
+
+    @ConfigProperty(name = "unify.profile.audio.max-size-bytes", defaultValue = "3145728") // 3 MB
+    long maxPresentationAudioBytes = 3_145_728L;
+
+    /** Nunca acima de {@link UserProfileAudio#MAX_DURATION_SECONDS} (check da V17). */
+    @ConfigProperty(name = "unify.profile.audio.max-duration-seconds", defaultValue = "60")
+    int maxPresentationAudioSeconds = UserProfileAudio.MAX_DURATION_SECONDS;
 
     @Override
     public UserProfileResponse getProfile(User user) {
@@ -280,24 +316,42 @@ public class UserProfileServiceImplementation implements UserProfileService {
     }
 
     @Override
-    public UserPublicProfileResponse getPublicProfile(UUID userProfileId) {
-        UserProfile profile = findPublicProfile(userProfileId);
-        return toPublicProfileResponse(profile);
+    public UserPublicProfileResponse getPublicProfile(User viewer, UUID userProfileId) {
+        UserProfile profile = findPublicProfile(viewer, userProfileId);
+
+        // Privacidade do DONO do perfil (não de quem vê). Sem linha = defaults (mostra tudo).
+        UserPrivacySettings settings = UserPrivacySettings.findByUser(profile.user);
+        boolean showAge = settings == null ? UserPrivacySettings.DEFAULT_SHOW_AGE : settings.showAge;
+        boolean showDistance = settings == null ? UserPrivacySettings.DEFAULT_SHOW_DISTANCE : settings.showDistance;
+
+        ProfileAccess access = profileAccessFor(viewer, profile);
+        return toPublicProfileResponse(
+                profile,
+                showAge && access.matchDataVisible() ? calculateAge(profile.user) : null,
+                showDistance && access.matchDataVisible() ? distanceBetween(viewer, profile) : null,
+                access
+        );
     }
 
     @Override
-    public UserPublicProfileGalleryImagesResponse getPublicGalleryImages(UUID userProfileId) {
-        UserProfile profile = findPublicProfile(userProfileId);
-        return new UserPublicProfileGalleryImagesResponse(profile.id, listPublicGalleryImageIds(profile));
+    public UserPublicProfileGalleryImagesResponse getPublicGalleryImages(User viewer, UUID userProfileId) {
+        UserProfile profile = findPublicProfile(viewer, userProfileId);
+        List<UUID> imageIds = profileAccessFor(viewer, profile).hidden().contains(ProfileField.GALLERY)
+                ? List.of()
+                : listPublicGalleryImageIds(profile);
+        return new UserPublicProfileGalleryImagesResponse(profile.id, imageIds);
     }
 
     @Override
-    public byte[] getPublicGalleryImageContent(UUID userProfileId, UUID imageId) {
+    public byte[] getPublicGalleryImageContent(User viewer, UUID userProfileId, UUID imageId) {
         if (imageId == null) {
             throw new IllegalArgumentException("Informe o identificador da imagem pública");
         }
 
-        UserProfile profile = findPublicProfile(userProfileId);
+        UserProfile profile = findPublicProfile(viewer, userProfileId);
+        if (profileAccessFor(viewer, profile).hidden().contains(ProfileField.GALLERY)) {
+            throw new NoSuchElementException(PUBLIC_GALLERY_IMAGE_NOT_FOUND_MESSAGE);
+        }
         UserProfileImage image = UserProfileImage.findActiveByIdAndUserProfile(imageId, profile);
         if (image == null || image.profilePicture) {
             throw new NoSuchElementException(PUBLIC_GALLERY_IMAGE_NOT_FOUND_MESSAGE);
@@ -374,6 +428,111 @@ public class UserProfileServiceImplementation implements UserProfileService {
         }
 
         return readStoredImage(image);
+    }
+
+    // ------------------------------------------- áudio de apresentação (frente D)
+
+    @Override
+    public UserProfileAudioStatusResponse getPresentationAudio(User user) {
+        UserProfile profile = UserProfile.findByUser(user);
+        UserProfileAudio audio = profile == null ? null : UserProfileAudio.findByUserProfile(profile);
+        return new UserProfileAudioStatusResponse(audio == null ? null : toAudioResponse(audio));
+    }
+
+    @Override
+    @Transactional
+    public UserProfileAudioResponse uploadPresentationAudio(
+            User user,
+            String contentType,
+            byte[] bytes,
+            Integer durationSeconds
+    ) {
+        // Valida antes de tocar no banco: um upload inválido não cria perfil nem apaga o áudio atual.
+        AudioMediaValidator.ValidatedAudio audio = audioMediaValidator.validate(
+                contentType,
+                bytes,
+                durationSeconds,
+                maxPresentationAudioBytes,
+                Math.min(maxPresentationAudioSeconds, UserProfileAudio.MAX_DURATION_SECONDS),
+                true
+        );
+
+        UserProfile profile = findOrCreateProfile(user);
+        ensureProfilePersisted(profile);
+
+        UserProfileAudio current = UserProfileAudio.findByUserProfile(profile);
+        if (current != null) {
+            // Substituir = apagar e inserir com id novo (URL imutável e cacheável). O trigger da
+            // V17 faz o lo_unlink. O flush vem antes do insert por causa da unique por perfil:
+            // sem ele o Hibernate executaria o INSERT antes do DELETE.
+            current.delete();
+            entityManager.flush();
+        }
+
+        UserProfileAudio created = new UserProfileAudio();
+        created.id = UUIDv7Generator.generate();
+        created.userProfile = profile;
+        created.oid = oidImageService.toOidBlob(audio.bytes());
+        created.contentType = audio.contentType();
+        created.sizeBytes = audio.bytes().length;
+        created.durationSeconds = audio.durationSeconds();
+        created.createdAt = Instant.now();
+        created.persist();
+
+        return toAudioResponse(created);
+    }
+
+    @Override
+    @Transactional
+    public void deletePresentationAudio(User user) {
+        UserProfile profile = UserProfile.findByUser(user);
+        UserProfileAudio audio = profile == null ? null : UserProfileAudio.findByUserProfile(profile);
+        if (audio == null) {
+            throw new NoSuchElementException(AUDIO_NOT_FOUND_MESSAGE);
+        }
+        // Delete físico (LGPD: voz é dado pessoal) — o trigger da V17 libera o large object.
+        audio.delete();
+    }
+
+    @Override
+    public AudioContent getPresentationAudioContent(User user, UUID audioId) {
+        UserProfile profile = UserProfile.findByUser(user);
+        UserProfileAudio audio = profile == null || audioId == null
+                ? null
+                : UserProfileAudio.findByIdAndUserProfile(audioId, profile);
+        if (audio == null) {
+            throw new NoSuchElementException(AUDIO_NOT_FOUND_MESSAGE);
+        }
+        return new AudioContent(oidImageService.readOidBlob(audio.oid), audio.contentType);
+    }
+
+    @Override
+    public AudioContent getPublicPresentationAudioContent(User viewer, UUID userProfileId, UUID audioId) {
+        if (audioId == null) {
+            throw new IllegalArgumentException("Informe o identificador do áudio");
+        }
+
+        // Obrigatoriamente pela guarda do perfil público: verificado + bloqueio (e banimento, semana 06).
+        UserProfile profile = findPublicProfile(viewer, userProfileId);
+        if (profileAccessFor(viewer, profile).hidden().contains(ProfileField.PRESENTATION_AUDIO)) {
+            throw new NoSuchElementException(AUDIO_NOT_FOUND_MESSAGE);
+        }
+        UserProfileAudio audio = UserProfileAudio.findByIdAndUserProfile(audioId, profile);
+        if (audio == null) {
+            throw new NoSuchElementException(AUDIO_NOT_FOUND_MESSAGE);
+        }
+        return new AudioContent(oidImageService.readOidBlob(audio.oid), audio.contentType);
+    }
+
+    private UserProfileAudioResponse toAudioResponse(UserProfileAudio audio) {
+        return new UserProfileAudioResponse(
+                audio.id,
+                audio.durationSeconds,
+                audio.contentType,
+                audio.sizeBytes,
+                audio.createdAt,
+                AUDIO_DOWNLOAD_URL_PREFIX + audio.id
+        );
     }
 
     private UserProfile findOrCreateProfile(User user) {
@@ -542,7 +701,13 @@ public class UserProfileServiceImplementation implements UserProfileService {
         return oidImageService.readOidBlob(image.oid);
     }
 
-    private UserProfile findPublicProfile(UUID userProfileId) {
+    /**
+     * GUARDA ÚNICA de perfil público: dados, galeria e áudio de apresentação
+     * passam por aqui. Bloqueio em qualquer direção devolve o MESMO 404 de
+     * perfil inexistente (não revela ao bloqueado que o bloqueio existe).
+     * Semana 06: banimento entra aqui também.
+     */
+    private UserProfile findPublicProfile(User viewer, UUID userProfileId) {
         if (userProfileId == null) {
             throw new IllegalArgumentException("Informe o parâmetro de consulta 'userProfileId'");
         }
@@ -551,8 +716,101 @@ public class UserProfileServiceImplementation implements UserProfileService {
         if (profile == null || profile.user == null || !profile.user.verified) {
             throw new NoSuchElementException(PUBLIC_PROFILE_NOT_FOUND_MESSAGE);
         }
+        if (viewer != null
+                && !viewer.id.equals(profile.user.id)
+                && userBlockService.isBlockedEitherDirection(viewer.id, profile.user.id)) {
+            throw new NoSuchElementException(PUBLIC_PROFILE_NOT_FOUND_MESSAGE);
+        }
 
         return profile;
+    }
+
+    /**
+     * O que {@code viewer} pode ver do perfil.
+     *
+     * @param locked           conta privada e o visitante não a segue.
+     * @param hidden           partes escondidas (vazias/nulas na resposta).
+     * @param matchDataVisible idade e distância podem sair (ainda sujeitas a showAge/showDistance).
+     */
+    record ProfileAccess(boolean locked, Set<ProfileField> hidden, boolean matchDataVisible) {
+    }
+
+    /**
+     * Partes que nunca aparecem num perfil privado travado, nem para match mútuo:
+     * só os dados de match (lookups do perfil, idade, distância) passam.
+     */
+    private static final Set<ProfileField> PRIVATE_CONTENT_FIELDS =
+            EnumSet.of(ProfileField.BIO, ProfileField.GALLERY, ProfileField.PRESENTATION_AUDIO);
+
+    /**
+     * Conta privada ({@code followApprovalRequired}) trava o perfil para quem não
+     * segue — pedido pendente não conta. Travado, o visitante comum não vê nada
+     * além de nome e foto. Quem tem match mútuo confirmado continua travado (sem
+     * bio, galeria, áudio e posts), mas vê os dados de match que o dono não
+     * escondeu na visibilidade granular. Destravado (seguidor), vale só a
+     * visibilidade granular. O dono vê tudo. Os endpoints de bytes (galeria,
+     * áudio) usam o mesmo resultado e respondem o 404 genérico.
+     */
+    private ProfileAccess profileAccessFor(User viewer, UserProfile profile) {
+        if (viewer != null && viewer.id.equals(profile.user.id)) {
+            return new ProfileAccess(false, Set.of(), true);
+        }
+        UserProfile viewerProfile = viewer == null ? null : UserProfile.findByUser(viewer);
+
+        if (UserPrivacySettings.requiresFollowApproval(profile.user)) {
+            boolean follows = viewerProfile != null && UserFollow.findPair(viewerProfile, profile) != null;
+            if (!follows) {
+                boolean mutualMatch = viewerProfile != null
+                        && UserPossibleMatch.existsConfirmedBetween(viewerProfile, profile);
+                if (!mutualMatch) {
+                    return new ProfileAccess(true, EnumSet.allOf(ProfileField.class), false);
+                }
+                Set<ProfileField> hidden = EnumSet.copyOf(PRIVATE_CONTENT_FIELDS);
+                hidden.addAll(hiddenFieldsFor(viewerProfile, profile));
+                return new ProfileAccess(true, hidden, true);
+            }
+        }
+
+        return new ProfileAccess(false, hiddenFieldsFor(viewerProfile, profile), true);
+    }
+
+    /**
+     * Partes do perfil que o visitante não vê (visibilidade granular do dono).
+     * As relações de follow só são consultadas se alguma parte depender delas.
+     */
+    private Set<ProfileField> hiddenFieldsFor(UserProfile viewerProfile, UserProfile profile) {
+        Map<ProfileField, ProfileFieldVisibility> configuration = UserProfileFieldVisibility.resolveAll(profile.user);
+        return ProfileFieldVisibilityPolicy.hiddenFields(configuration, new ProfileFieldVisibilityPolicy.Relationship() {
+            @Override
+            public boolean viewerFollowsOwner() {
+                return viewerProfile != null && UserFollow.findPair(viewerProfile, profile) != null;
+            }
+
+            @Override
+            public boolean ownerFollowsViewer() {
+                return viewerProfile != null && UserFollow.findPair(profile, viewerProfile) != null;
+            }
+        });
+    }
+
+    /** Distância em km (1 casa) entre as localizações ativas; nula se faltar de um dos lados. */
+    private Double distanceBetween(User viewer, UserProfile profile) {
+        UserProfile viewerProfile = viewer == null ? null : UserProfile.findByUser(viewer);
+        UserCoordinates viewerCoordinate = viewerProfile == null ? null : viewerProfile.getActiveCoordinate();
+        UserCoordinates profileCoordinate = profile.getActiveCoordinate();
+        if (viewerCoordinate == null || profileCoordinate == null
+                || viewerCoordinate.latitude == null || viewerCoordinate.longitude == null
+                || profileCoordinate.latitude == null || profileCoordinate.longitude == null) {
+            return null;
+        }
+
+        double distanceKm = GeoUtils.distanceKm(
+                viewerCoordinate.latitude.doubleValue(),
+                viewerCoordinate.longitude.doubleValue(),
+                profileCoordinate.latitude.doubleValue(),
+                profileCoordinate.longitude.doubleValue()
+        );
+        return Math.round(distanceKm * 10d) / 10d;
     }
 
     private List<UUID> listPublicGalleryImageIds(UserProfile profile) {
@@ -594,41 +852,84 @@ public class UserProfileServiceImplementation implements UserProfileService {
                         .toList(),
                 activeCoordinate == null ? null : new LocationResponse(activeCoordinate.latitude, activeCoordinate.longitude, activeCoordinate.active),
                 imagesResponse.profilePicture(),
-                imagesResponse.galleryImages()
+                imagesResponse.galleryImages(),
+                findPresentationAudioResponse(profile)
         );
     }
 
-            private UserPublicProfileResponse toPublicProfileResponse(UserProfile profile) {
-            return new UserPublicProfileResponse(
+    /** Uma query só ({@code findByUserProfile}); nunca navegação de coleção. */
+    private UserProfileAudioResponse findPresentationAudioResponse(UserProfile profile) {
+        if (profile.id == null) {
+            return null;
+        }
+        UserProfileAudio audio = UserProfileAudio.findByUserProfile(profile);
+        return audio == null ? null : toAudioResponse(audio);
+    }
+
+    /**
+     * Parte escondida sai nula (campo simples) ou vazia (lista) e é listada em
+     * {@code hiddenFields}. Nada escondido é nem lido do banco (galeria, áudio).
+     */
+    private UserPublicProfileResponse toPublicProfileResponse(
+            UserProfile profile,
+            Integer age,
+            Double distanceKm,
+            ProfileAccess access
+    ) {
+        Set<ProfileField> hidden = access.hidden();
+        UserProfileAudio presentationAudio = hidden.contains(ProfileField.PRESENTATION_AUDIO)
+                ? null
+                : UserProfileAudio.findByUserProfile(profile);
+        return new UserPublicProfileResponse(
                 profile.id,
                 profile.user == null ? null : profile.user.name,
-                calculateAge(profile.user),
-                profile.bio,
-                profile.gender == null ? null : toOption(profile.gender.id, profile.gender.description),
-                profile.pronouns == null ? null : toOption(profile.pronouns.id, profile.pronouns.description),
-                profile.disabilities.stream()
-                    .map(disability -> new DisabilityOptionResponse(disability.id, disability.description, disability.ionicIcon))
-                    .toList(),
-                profile.accessibilityNeeds.stream()
-                    .map(need -> toOption(need.id, need.description))
-                    .toList(),
-                profile.autonomyLevel == null ? null : toOption(profile.autonomyLevel.id, profile.autonomyLevel.description),
-                profile.communicationForms.stream()
-                    .map(form -> toOption(form.id, form.description))
-                    .toList(),
-                profile.lifestyleTypes.stream()
-                    .map(type -> toOption(type.id, type.description))
-                    .toList(),
-                profile.loveLanguages.stream()
-                    .map(type -> toOption(type.id, type.description))
-                    .toList(),
-                profile.energyLevel == null ? null : toOption(profile.energyLevel.id, profile.energyLevel.description),
-                profile.interestTypes.stream()
-                    .map(type -> toOption(type.id, type.description))
-                    .toList(),
-                listPublicGalleryImageIds(profile)
-            );
-            }
+                age,
+                distanceKm,
+                hidden.contains(ProfileField.BIO) ? null : profile.bio,
+                hidden.contains(ProfileField.GENDER) || profile.gender == null
+                        ? null
+                        : toOption(profile.gender.id, profile.gender.description),
+                hidden.contains(ProfileField.PRONOUNS) || profile.pronouns == null
+                        ? null
+                        : toOption(profile.pronouns.id, profile.pronouns.description),
+                hidden.contains(ProfileField.DISABILITIES)
+                        ? List.of()
+                        : profile.disabilities.stream()
+                                .map(disability -> new DisabilityOptionResponse(disability.id, disability.description, disability.ionicIcon))
+                                .toList(),
+                hidden.contains(ProfileField.ACCESSIBILITY_NEEDS)
+                        ? List.of()
+                        : profile.accessibilityNeeds.stream().map(need -> toOption(need.id, need.description)).toList(),
+                hidden.contains(ProfileField.AUTONOMY_LEVEL) || profile.autonomyLevel == null
+                        ? null
+                        : toOption(profile.autonomyLevel.id, profile.autonomyLevel.description),
+                hidden.contains(ProfileField.COMMUNICATION_FORMS)
+                        ? List.of()
+                        : profile.communicationForms.stream().map(form -> toOption(form.id, form.description)).toList(),
+                hidden.contains(ProfileField.LIFESTYLE_TYPES)
+                        ? List.of()
+                        : profile.lifestyleTypes.stream().map(type -> toOption(type.id, type.description)).toList(),
+                hidden.contains(ProfileField.LOVE_LANGUAGES)
+                        ? List.of()
+                        : profile.loveLanguages.stream().map(type -> toOption(type.id, type.description)).toList(),
+                hidden.contains(ProfileField.ENERGY_LEVEL) || profile.energyLevel == null
+                        ? null
+                        : toOption(profile.energyLevel.id, profile.energyLevel.description),
+                hidden.contains(ProfileField.INTEREST_TYPES)
+                        ? List.of()
+                        : profile.interestTypes.stream().map(type -> toOption(type.id, type.description)).toList(),
+                hidden.contains(ProfileField.GALLERY) ? List.of() : listPublicGalleryImageIds(profile),
+                presentationAudio == null
+                        ? null
+                        : new UserProfileAudioPublicResponse(presentationAudio.id, presentationAudio.durationSeconds),
+                hidden.stream().map(ProfileField::name).toList(),
+                access.locked(),
+                profile.user.id,
+                UserProfileImage.findActiveProfilePicture(profile) == null
+                        ? null
+                        : PUBLIC_AVATAR_URL_PREFIX + profile.user.id + PUBLIC_AVATAR_URL_SUFFIX
+        );
+    }
 
     private Integer calculateAge(User user) {
         if (user == null || user.birthdate == null) {
@@ -703,7 +1004,8 @@ public class UserProfileServiceImplementation implements UserProfileService {
                 List.of(),
                 null,
                 null,
-                List.of()
+                List.of(),
+                null
         );
     }
 

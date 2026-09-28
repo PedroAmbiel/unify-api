@@ -20,7 +20,9 @@ import br.com.unify.matchable.user.dto.MatchDecisionResponse;
 import br.com.unify.matchable.user.dto.PotentialMatchesRequest;
 import br.com.unify.matchable.user.entity.Gender;
 import br.com.unify.matchable.user.entity.User;
+import br.com.unify.matchable.user.entity.UserBlock;
 import br.com.unify.matchable.user.entity.UserPossibleMatch;
+import br.com.unify.matchable.user.entity.UserPrivacySettings;
 import br.com.unify.matchable.user.entity.UserProfile;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
@@ -177,6 +179,64 @@ class UserMatchDiscoveryIntegrationTest {
         assertFalse(visible.contains(alice.profileId()), "o próprio perfil nunca é visível");
         assertTrue(visible.contains(carla.profileId()), "convite recebido não é excluído");
         assertTrue(visible.contains(davi.profileId()), "perfil sem relação alguma continua visível");
+    }
+
+    // ---------------------------------------------------------------- T6 (semana 04)
+
+    @Test
+    @TestTransaction
+    void nonDiscoverableProfileIsNotOffered() {
+        Fixture alice = createProfile("Alice");
+        Fixture davi = createProfile("Davi");
+        Fixture eva = createProfile("Eva");
+
+        UserPrivacySettings settings = new UserPrivacySettings();
+        settings.id = UUIDv7Generator.generate();
+        settings.user = davi.user();
+        settings.discoverable = false;
+        settings.updatedAt = Instant.now();
+        settings.persist();
+        entityManager.flush();
+
+        List<UUID> feed = userMatchService.getPotentialMatches(alice.user(), NO_ALREADY_USED);
+        assertFalse(feed.contains(davi.profileId()), "discoverable=false sai do discovery");
+        assertTrue(feed.contains(eva.profileId()), "controle positivo: quem não tem linha de privacidade é descobrível");
+    }
+
+    // ---------------------------------------------------------------- T7 (semana 04)
+
+    @Test
+    @TestTransaction
+    void blockedProfilesAreExcludedFromOrganicAndInboundPathsInBothDirections() {
+        Fixture alice = createProfile("Alice");
+        Fixture bruno = createProfile("Bruno");
+        Fixture carla = createProfile("Carla");
+
+        // Carla curtiu Alice (convite inbound) e depois Alice bloqueia Carla; Bruno bloqueia Alice.
+        userMatchService.registerDecision(carla.user(), new MatchDecisionRequest(alice.profileId(), true));
+        persistBlock(alice.user(), carla.user());
+        persistBlock(bruno.user(), alice.user());
+        entityManager.flush();
+
+        List<UUID> feed = userMatchService.getPotentialMatches(alice.user(), NO_ALREADY_USED);
+        assertFalse(feed.contains(bruno.profileId()), "quem me bloqueou não aparece");
+        assertFalse(feed.contains(carla.profileId()), "quem eu bloqueei não aparece, nem como convite");
+
+        List<UUID> brunoFeed = userMatchService.getPotentialMatches(bruno.user(), NO_ALREADY_USED);
+        assertFalse(brunoFeed.contains(alice.profileId()), "simétrico: o bloqueado some para quem bloqueou");
+
+        List<UUID> visible = userMatchService.filterVisibleProfileIds(
+                alice.user(), List.of(bruno.profileId(), carla.profileId()));
+        assertTrue(visible.isEmpty(), "o gêmeo JPQL aplica o mesmo bloqueio");
+    }
+
+    private void persistBlock(User blocker, User blocked) {
+        UserBlock block = new UserBlock();
+        block.id = UUIDv7Generator.generate();
+        block.blocker = blocker;
+        block.blocked = blocked;
+        block.createdAt = Instant.now();
+        block.persist();
     }
 
     // ---------------------------------------------------------------- fixture

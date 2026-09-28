@@ -40,7 +40,15 @@ class RoutingContractTest {
             "/users/reports/reasons",
             "/users/" + SAMPLE_UUID + "/follow-stats",
             "/users/" + SAMPLE_UUID + "/posts",
-            "/users/posts/" + SAMPLE_UUID + "/media"
+            "/users/posts/" + SAMPLE_UUID + "/media",
+            // semana 04 — privacidade, bloqueio e áudio de apresentação
+            "/users/me/privacy-settings",
+            "/users/me/blocks",
+            "/users/me/profile/audio",
+            "/users/me/profile/audio/" + SAMPLE_UUID,
+            "/users/me/profile/public/audio/" + SAMPLE_UUID + "?userProfileId=" + SAMPLE_UUID,
+            "/users/follow-requests",
+            "/users/follow-requests/sent"
     })
     void protectedGetRouteRespondsUnauthorizedNotNotFound(String path) {
         given()
@@ -74,12 +82,42 @@ class RoutingContractTest {
                 .when().post("/users/" + SAMPLE_UUID + "/follow")
                 .then()
                 .statusCode(equalTo(401));
+
+        given()
+                .when().post("/users/" + SAMPLE_UUID + "/block")
+                .then()
+                .statusCode(equalTo(401));
+
+        given()
+                .when().post("/users/follow-requests/" + SAMPLE_UUID + "/accept")
+                .then()
+                .statusCode(equalTo(401));
+    }
+
+    /** PUT com o Content-Type que cada rota consome (415 antes de 401, ver acima). */
+    @Test
+    void protectedPutRoutesRespondUnauthorizedNotNotFound() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("{}")
+                .when().put("/users/me/privacy-settings")
+                .then()
+                .statusCode(equalTo(401));
+
+        given()
+                .multiPart("durationSeconds", "10")
+                .when().put("/users/me/profile/audio")
+                .then()
+                .statusCode(equalTo(401));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {
             "/users/" + SAMPLE_UUID + "/follow",
-            "/users/posts/" + SAMPLE_UUID
+            "/users/posts/" + SAMPLE_UUID,
+            "/users/" + SAMPLE_UUID + "/block",
+            "/users/me/profile/audio",
+            "/users/follow-requests/" + SAMPLE_UUID
     })
     void protectedDeleteRouteRespondsUnauthorizedNotNotFound(String path) {
         given()

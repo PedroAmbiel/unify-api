@@ -16,6 +16,7 @@ import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.social.dto.FollowActionResponse;
 import br.com.unify.matchable.social.dto.FollowPageResponse;
+import br.com.unify.matchable.social.dto.FollowRequestPageResponse;
 import br.com.unify.matchable.social.dto.FollowStatsResponse;
 import br.com.unify.matchable.post.enums.PostOrigin;
 import br.com.unify.matchable.social.dto.UserFeedPageResponse;
@@ -297,6 +298,36 @@ class SocialResourceTest {
 
     private static final class StubSocialService implements SocialService {
         private RuntimeException nextException;
+
+        @Override
+        public FollowRequestPageResponse listFollowRequests(User currentUser, Integer page, Integer size) {
+            return new FollowRequestPageResponse(List.of(), 0, 20, 0L, 0, false);
+        }
+
+        @Override
+        public FollowRequestPageResponse listSentFollowRequests(User currentUser, Integer page, Integer size) {
+            return new FollowRequestPageResponse(List.of(), 0, 20, 0L, 0, false);
+        }
+
+        @Override
+        public void acceptFollowRequest(User currentUser, UUID requestId) {
+            throwIfConfigured();
+        }
+
+        @Override
+        public void deleteFollowRequest(User currentUser, UUID requestId) {
+            throwIfConfigured();
+        }
+
+        @Override
+        public void acceptAllPendingFollowRequests(User currentUser) {
+        }
+
+        private void throwIfConfigured() {
+            if (nextException != null) {
+                throw nextException;
+            }
+        }
         private FollowActionResponse followResponse;
         private UserPostResponse postResponse;
         private UserFeedPageResponse feedResponse;

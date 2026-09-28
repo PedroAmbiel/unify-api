@@ -147,6 +147,8 @@ public class ChatResource extends AuthenticatedResource {
             return validationErrorResponse(exception.getMessage());
         } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }
@@ -185,6 +187,8 @@ public class ChatResource extends AuthenticatedResource {
             return validationErrorResponse(exception.getMessage());
         } catch (ForbiddenException exception) {
             return forbiddenResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }

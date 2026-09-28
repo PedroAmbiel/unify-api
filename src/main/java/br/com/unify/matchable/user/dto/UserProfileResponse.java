@@ -21,6 +21,8 @@ public record UserProfileResponse(
         List<LookupOptionResponse> interestTypes,
         LocationResponse activeLocation,
         UserProfileImageResponse profilePicture,
-        List<UserProfileImageResponse> galleryImages
+        List<UserProfileImageResponse> galleryImages,
+        /** Frente D: nulo quando ainda não há áudio de apresentação. */
+        UserProfileAudioResponse presentationAudio
 ) {
 }

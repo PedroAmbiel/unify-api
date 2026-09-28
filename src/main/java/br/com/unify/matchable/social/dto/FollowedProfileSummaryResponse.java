@@ -7,6 +7,7 @@ public record FollowedProfileSummaryResponse(
         UUID userId,
         String name,
         String avatarUrl,
-        boolean followedByCurrentUser
+        boolean followedByCurrentUser,
+        boolean followRequestedByCurrentUser
 ) {
 }
