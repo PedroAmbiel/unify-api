@@ -704,7 +704,7 @@ public class CommunityServiceImplementation implements CommunityService {
             throw new ForbiddenException(COMMENT_DELETE_FORBIDDEN_MESSAGE);
         }
 
-        comment.delete();
+        comment.deactivate();
     }
 
     @Override

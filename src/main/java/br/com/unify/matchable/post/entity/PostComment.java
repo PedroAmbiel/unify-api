@@ -20,7 +20,13 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.ColumnDefault;
 
+/**
+ * Comentário de post pessoal ou de comunidade. {@code active = false} é o soft
+ * delete (V20): a linha fica como evidência para a moderação e todas as
+ * consultas abaixo só enxergam comentários ativos.
+ */
 @Entity
 @Table(name = "post_comments")
 public class PostComment extends PanacheEntityBase {
@@ -43,25 +49,34 @@ public class PostComment extends PanacheEntityBase {
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;
 
+    @ColumnDefault("true")
+    @Column(name = "active", nullable = false)
+    public boolean active = true;
+
+    /** Soft delete: some das listagens e contagens, a linha continua no banco. */
+    public void deactivate() {
+        active = false;
+    }
+
     public static List<PostComment> listByPost(Post post) {
         return queryByPost(post).list();
     }
 
     /** Ordenacao estavel para paginacao: cronologica (indice created_at). */
     public static PanacheQuery<PostComment> queryByPost(Post post) {
-        return find("post = ?1 order by createdAt asc, id asc", post);
+        return find("post = ?1 and active = true order by createdAt asc, id asc", post);
     }
 
     public static long countByPost(Post post) {
-        return count("post", post);
+        return count("post = ?1 and active = true", post);
     }
 
     public static boolean existsByPostAndUser(Post post, User user) {
-        return count("post = ?1 and author = ?2", post, user) > 0;
+        return count("post = ?1 and author = ?2 and active = true", post, user) > 0;
     }
 
     public static PostComment findByIdAndPost(UUID id, Post post) {
-        return find("id = ?1 and post = ?2", id, post).firstResult();
+        return find("id = ?1 and post = ?2 and active = true", id, post).firstResult();
     }
 
     /** Contagem de comentários de uma página de posts em UMA query (sem N+1). */
@@ -71,7 +86,7 @@ public class PostComment extends PanacheEntityBase {
             return counts;
         }
         List<Object[]> rows = getEntityManager()
-                .createQuery("select c.post.id, count(c) from PostComment c where c.post.id in :ids group by c.post.id", Object[].class)
+                .createQuery("select c.post.id, count(c) from PostComment c where c.post.id in :ids and c.active = true group by c.post.id", Object[].class)
                 .setParameter("ids", postIds)
                 .getResultList();
         for (Object[] row : rows) {
@@ -86,7 +101,7 @@ public class PostComment extends PanacheEntityBase {
             return new HashSet<>();
         }
         return new HashSet<>(getEntityManager()
-                .createQuery("select distinct c.post.id from PostComment c where c.author = :user and c.post.id in :ids", UUID.class)
+                .createQuery("select distinct c.post.id from PostComment c where c.author = :user and c.post.id in :ids and c.active = true", UUID.class)
                 .setParameter("user", user)
                 .setParameter("ids", postIds)
                 .getResultList());

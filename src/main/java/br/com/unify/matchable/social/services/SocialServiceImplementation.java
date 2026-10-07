@@ -2,11 +2,13 @@ package br.com.unify.matchable.social.services;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import br.com.unify.matchable.common.UUIDv7Generator;
 import br.com.unify.matchable.common.dto.PageParams;
@@ -524,7 +526,7 @@ public class SocialServiceImplementation implements SocialService {
             throw new ForbiddenException(COMMENT_DELETE_FORBIDDEN_MESSAGE);
         }
 
-        comment.delete();
+        comment.deactivate();
     }
 
     @Override
@@ -622,13 +624,12 @@ public class SocialServiceImplementation implements SocialService {
         Map<UUID, Long> commentCounts = PostComment.countByPostIds(postIds);
         Set<UUID> likedIds = PostLike.listPostIdsByUser(currentUser, postIds);
         Set<UUID> commentedIds = PostComment.listPostIdsByUser(currentUser, postIds);
-        // Autores repetem muito numa página: resolve cada um uma vez só.
-        Map<UUID, UserPostAuthorResponse> authors = new HashMap<>();
+        Map<UUID, UserPostAuthorResponse> authors = loadAuthors(posts.stream().map(post -> post.author).toList());
 
         return posts.stream()
                 .map(post -> toPostResponse(
                         post,
-                        authors.computeIfAbsent(post.author.id, ignored -> toAuthorResponse(post.author)),
+                        authors.get(post.author.id),
                         likeCounts.getOrDefault(post.id, 0L),
                         commentCounts.getOrDefault(post.id, 0L),
                         likedIds.contains(post.id),
@@ -725,6 +726,45 @@ public class SocialServiceImplementation implements SocialService {
                 comment.createdAt,
                 currentUser != null && comment.author.id.equals(currentUser.id)
         );
+    }
+
+    /**
+     * Autores de uma página inteira em três queries (usuários, perfis e quem tem
+     * foto de perfil ativa), em vez de perfil + foto por autor distinto.
+     */
+    private Map<UUID, UserPostAuthorResponse> loadAuthors(List<User> authors) {
+        Map<UUID, UserPostAuthorResponse> result = new HashMap<>();
+        Map<UUID, User> authorsById = authors.stream()
+                .collect(Collectors.toMap(author -> author.id, author -> author, (first, ignored) -> first));
+        Set<UUID> userIds = authorsById.keySet();
+        if (userIds.isEmpty()) {
+            return result;
+        }
+        // join fetch: usuário e perfil chegam juntos; carregar User sozinho dispara
+        // uma query por autor para o OneToOne inverso User.profile.
+        Map<UUID, UserProfile> profilesByUserId = UserProfile.<UserProfile>list(
+                        "select p from UserProfile p join fetch p.user u where u.id in ?1", userIds).stream()
+                .collect(Collectors.toMap(profile -> profile.user.id, profile -> profile, (first, ignored) -> first));
+        Set<UUID> withPicture = profilesByUserId.isEmpty()
+                ? Set.of()
+                : new HashSet<>(UserProfileImage.getEntityManager()
+                        .createQuery("select i.userProfile.user.id from UserProfileImage i "
+                                + "where i.userProfile.id in :profileIds and i.active = true and i.profilePicture = true",
+                                UUID.class)
+                        .setParameter("profileIds", profilesByUserId.values().stream().map(profile -> profile.id).toList())
+                        .getResultList());
+
+        for (UUID userId : userIds) {
+            UserProfile profile = profilesByUserId.get(userId);
+            User user = profile != null ? profile.user : authorsById.get(userId);
+            result.put(userId, new UserPostAuthorResponse(
+                    profile == null ? null : profile.id,
+                    userId,
+                    buildDisplayName(user),
+                    withPicture.contains(userId) ? AVATAR_URL_PREFIX + userId + AVATAR_URL_SUFFIX : null
+            ));
+        }
+        return result;
     }
 
     private UserPostAuthorResponse toAuthorResponse(User author) {

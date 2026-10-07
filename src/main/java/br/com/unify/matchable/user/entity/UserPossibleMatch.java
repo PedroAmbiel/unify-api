@@ -83,9 +83,20 @@ public class UserPossibleMatch extends PanacheEntityBase {
         return list("starterProfile = ?1 and pendingAccepted is null and declinedAt is null order by createdAt desc", starterProfile);
     }
 
+    /**
+     * Matches mútuos do perfil, sem os que têm bloqueio em qualquer direção entre as
+     * partes: o match confirmado continua no banco (nunca delete aqui), mas some da
+     * lista de conexões dos dois, como o perfil (404) e o discovery.
+     */
     public static PanacheQuery<UserPossibleMatch> findConfirmedForProfile(UserProfile profile) {
         return find(
-                "(starterProfile = ?1 or pendingProfile = ?1) and starterAccepted = true and pendingAccepted = true order by createdAt desc",
+                "from UserPossibleMatch m "
+                        + "where (m.starterProfile = ?1 or m.pendingProfile = ?1) "
+                        + "  and m.starterAccepted = true and m.pendingAccepted = true "
+                        + "  and not exists (select 1 from UserBlock b "
+                        + "      where (b.blocker = m.starterProfile.user and b.blocked = m.pendingProfile.user) "
+                        + "         or (b.blocker = m.pendingProfile.user and b.blocked = m.starterProfile.user)) "
+                        + "order by m.createdAt desc",
                 profile
         );
     }

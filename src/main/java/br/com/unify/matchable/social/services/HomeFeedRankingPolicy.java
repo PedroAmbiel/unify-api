@@ -196,7 +196,7 @@ public final class HomeFeedRankingPolicy {
                        end
                        + least(%16$s,
                            %14$s * (select count(*) from post_likes l where l.fk_post = p.id)
-                           + %15$s * (select count(*) from post_comments cm where cm.fk_post = p.id))
+                           + %15$s * (select count(*) from post_comments cm where cm.fk_post = p.id and cm.active = true))
                        + %17$s / (1 + greatest(0, extract(epoch from (now() - p.created_at)) / 3600.0) / %18$s)
                    ) as score,
                    p.created_at

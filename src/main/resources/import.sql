@@ -23,7 +23,8 @@ create index if not exists idx_posts_feed
     on posts (fk_community, created_at desc, id desc);
 
 create index if not exists idx_post_comments_post
-    on post_comments (fk_post, created_at asc, id asc);
+    on post_comments (fk_post, created_at asc, id asc)
+    where active = true;
 
 create index if not exists idx_post_likes_post
     on post_likes (fk_post);

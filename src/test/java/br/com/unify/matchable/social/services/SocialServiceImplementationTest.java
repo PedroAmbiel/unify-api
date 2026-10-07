@@ -24,6 +24,7 @@ import br.com.unify.matchable.community.entity.CommunityMembership;
 import br.com.unify.matchable.community.enums.CommunityMemberRole;
 import br.com.unify.matchable.community.enums.CommunityPrivacy;
 import br.com.unify.matchable.post.entity.Post;
+import br.com.unify.matchable.post.entity.PostComment;
 import br.com.unify.matchable.post.entity.PostLike;
 import br.com.unify.matchable.post.enums.PostOrigin;
 import br.com.unify.matchable.social.dto.FollowActionResponse;
@@ -430,6 +431,12 @@ class SocialServiceImplementationTest {
         service.deleteComment(ana.user, post.id(), betoComment.id());
         service.deleteComment(caio.user, post.id(), caioComment.id());
         assertEquals(0, service.getComments(ana.user, post.id(), 0, 20).totalElements());
+        // Soft delete (V20): a linha continua no banco como evidência para a moderação.
+        PostComment removed = PostComment.findById(betoComment.id());
+        assertNotNull(removed);
+        assertFalse(removed.active);
+        assertEquals(0, service.listPostsByProfile(ana.user, ana.profile.id, 0, 20).posts().get(0).commentsCount(),
+                "comentário removido não conta");
         assertThrows(NoSuchElementException.class, () -> service.deleteComment(ana.user, post.id(), betoComment.id()));
     }
 

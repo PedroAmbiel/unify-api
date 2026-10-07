@@ -32,6 +32,9 @@ class UserBlockServiceImplementationTest {
     @Inject
     UserBlockService service;
 
+    @Inject
+    UserMatchService userMatchService;
+
     @Test
     @TestTransaction
     void blockRemovesFollowsInBothDirections() {
@@ -71,6 +74,33 @@ class UserBlockServiceImplementationTest {
         assertNotNull(after.declinedAt);
         assertEquals(ana.profile.id, after.declinedByProfile.id);
         assertTrue(UserPossibleMatch.listInboundPending(ana.profile).isEmpty());
+    }
+
+    @Test
+    @TestTransaction
+    void blockHidesConfirmedMatchFromBothConnectionListsAndUnblockBringsItBack() {
+        Fixture ana = fixture("Ana");
+        Fixture beto = fixture("Beto");
+        UserPossibleMatch mutual = new UserPossibleMatch();
+        mutual.id = UUIDv7Generator.generate();
+        mutual.starterProfile = ana.profile;
+        mutual.pendingProfile = beto.profile;
+        mutual.createdAt = Instant.now();
+        mutual.starterAccepted = true;
+        mutual.pendingAccepted = true;
+        mutual.persist();
+        assertEquals(1, userMatchService.getMutualMatches(beto.user).size());
+
+        service.blockUser(ana.user, beto.profile.id);
+
+        // A linha fica (nunca delete em user_possible_matches), só some das listas.
+        assertNotNull(UserPossibleMatch.findById(mutual.id));
+        assertTrue(userMatchService.getMutualMatches(ana.user).isEmpty());
+        assertTrue(userMatchService.getMutualMatches(beto.user).isEmpty(), "o bloqueado também não vê");
+        assertEquals(0L, userMatchService.getMutualMatchesPage(beto.user, 0, 20).totalElements());
+
+        service.unblockUser(ana.user, beto.profile.id);
+        assertEquals(1, userMatchService.getMutualMatches(beto.user).size());
     }
 
     // Exceção dentro de um método @Transactional deixa a transação do teste abortada: cada
