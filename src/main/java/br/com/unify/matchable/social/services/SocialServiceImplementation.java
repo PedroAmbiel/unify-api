@@ -706,7 +706,8 @@ public class SocialServiceImplementation implements SocialService {
                 commentsCount,
                 likedByCurrentUser,
                 commentedByCurrentUser,
-                feedSource
+                feedSource,
+                communityPost ? post.imageDescription : null
         );
     }
 

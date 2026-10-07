@@ -65,9 +65,13 @@ public interface CommunityService {
 
     CommunityPostResponse createPost(User user, UUID communityId, String body, byte[] imageBytes);
 
-    /** Só o autor edita, e só o texto; marca {@code editedAt}. */
+    /** Compatibility entry point: only body changes; image/description are preserved. */
     CommunityPostResponse updatePost(User user, UUID postId, String body);
 
+    CommunityPostResponse createPost(User user, UUID communityId, String body, byte[] imageBytes, String description);
+    CommunityPostResponse getPost(User user, UUID postId);
+    CommunityPostResponse updatePost(User user, UUID postId, String body, String description, boolean descriptionPresent);
+    CommunityPostResponse updatePostMedia(User user, UUID postId, String body, byte[] imageBytes, boolean removeImage, String description);
     void deletePost(User user, UUID postId);
 
     CommunityLikeResponse likePost(User user, UUID postId);
@@ -79,6 +83,10 @@ public interface CommunityService {
     PageResponse<CommunityCommentResponse> getComments(User user, UUID postId, Integer page, Integer size);
 
     CommunityCommentResponse createComment(User user, UUID postId, String body);
+
+    CommunityCommentResponse createComment(User user, UUID postId, String body, byte[] imageBytes, String imageDescription);
+
+    byte[] getCommentMedia(User user, UUID postId, UUID commentId);
 
     void deleteComment(User user, UUID postId, UUID commentId);
 

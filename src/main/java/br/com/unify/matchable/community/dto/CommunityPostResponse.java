@@ -13,6 +13,13 @@ public record CommunityPostResponse(
         Long likesCount,
         Long commentsCount,
         Boolean likedByCurrentUser,
-        Boolean commentedByCurrentUser
+        Boolean commentedByCurrentUser,
+        String imageDescription
 ) {
+    public CommunityPostResponse(UUID id, CommunityAuthorResponse author, String publishedAt,
+            String body, String mediaData, Instant editedAt, Long likesCount, Long commentsCount,
+            Boolean likedByCurrentUser, Boolean commentedByCurrentUser) {
+        this(id, author, publishedAt, body, mediaData, editedAt, likesCount, commentsCount,
+                likedByCurrentUser, commentedByCurrentUser, null);
+    }
 }

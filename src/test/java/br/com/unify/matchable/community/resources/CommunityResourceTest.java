@@ -708,6 +708,45 @@ class CommunityResourceTest {
         return user;
     }
 
+    @Test
+    void multipartCommentForwardsImageAndDescription() {
+        StubCommunityService service = new StubCommunityService();
+        UUID postId = UUID.randomUUID();
+        service.commentResponse = new CommunityCommentResponse(UUID.randomUUID(), null, null, "", true, "/image", "Uma árvore");
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+        resource.nextUploadedBytes = new byte[] { 1, 2, 3 };
+        Response response = resource.createCommentWithImage(postId, "", null, "Uma árvore");
+        assertEquals(201, response.getStatus());
+        assertEquals(postId, service.capturedPostId);
+        assertArrayEquals(resource.nextUploadedBytes, service.capturedCommentImage);
+        assertEquals("Uma árvore", service.capturedCommentDescription);
+        assertEquals("Uma árvore", ((CommunityCommentResponse) response.getEntity()).imageDescription());
+    }
+
+    @Test
+    void commentMediaRequiresAnAuthenticatedUser() {
+        TestableCommunityResource resource = new TestableCommunityResource();
+        assertEquals(404, resource.getCommentMedia(UUID.randomUUID(), UUID.randomUUID()).getStatus());
+    }
+
+    @Test
+    void commentMediaReturnsStoredBytesAndMatchesItsPost() {
+        StubCommunityService service = new StubCommunityService();
+        service.mediaBytes = new byte[] { 7, 8, 9 };
+        TestableCommunityResource resource = new TestableCommunityResource();
+        resource.communityService = service;
+        resource.currentUser = buildUser();
+        UUID postId = UUID.randomUUID(), commentId = UUID.randomUUID();
+        Response response = resource.getCommentMedia(postId, commentId);
+        assertEquals(200, response.getStatus());
+        assertEquals("image/jpeg", response.getMediaType().toString());
+        assertArrayEquals(service.mediaBytes, (byte[]) response.getEntity());
+        assertEquals(postId, service.capturedPostId);
+        assertEquals(commentId, service.capturedCommentId);
+    }
+
     private static final class TestableCommunityResource extends CommunityResource {
         private User currentUser;
         private byte[] nextUploadedBytes;
@@ -724,6 +763,19 @@ class CommunityResourceTest {
     }
 
     private static final class StubCommunityService implements CommunityService {
+        private byte[] capturedCommentImage;
+        private String capturedCommentDescription;
+        @Override
+        public CommunityCommentResponse createComment(User user, UUID postId, String body, byte[] imageBytes, String description) {
+            capturedCommentImage = imageBytes;
+            capturedCommentDescription = description;
+            return createComment(user, postId, body);
+        }
+        @Override
+        public byte[] getCommentMedia(User user, UUID postId, UUID commentId) {
+            capturedCommentId = commentId;
+            return getPostMedia(user, postId);
+        }
         private User capturedUser;
         private Integer capturedPage;
         private Integer capturedSize;
@@ -1002,6 +1054,20 @@ class CommunityResourceTest {
             return memberResponse;
         }
 
+        @Override
+        public CommunityPostResponse createPost(User user, UUID communityId, String body, byte[] imageBytes, String description) {
+            return createPost(user, communityId, body, imageBytes);
+        }
+        @Override
+        public CommunityPostResponse getPost(User user, UUID postId) { return postResponse; }
+        @Override
+        public CommunityPostResponse updatePost(User user, UUID postId, String body, String description, boolean present) {
+            return updatePost(user, postId, body);
+        }
+        @Override
+        public CommunityPostResponse updatePostMedia(User user, UUID postId, String body, byte[] image, boolean remove, String description) {
+            return updatePost(user, postId, body);
+        }
         @Override
         public CommunityPostResponse createPost(User user, UUID communityId, String body, byte[] imageBytes) {
             capturedUser = user;

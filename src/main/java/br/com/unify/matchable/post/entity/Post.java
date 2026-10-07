@@ -59,6 +59,9 @@ public class Post extends PanacheEntityBase {
     @Column(name = "body", nullable = false, length = 4000)
     public String body;
 
+    @Column(name = "image_description", length = 240)
+    public String imageDescription;
+
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;
 

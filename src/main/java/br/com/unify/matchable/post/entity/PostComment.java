@@ -1,6 +1,10 @@
 package br.com.unify.matchable.post.entity;
 
+import java.sql.Blob;
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+import jakarta.persistence.Lob;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -45,6 +49,14 @@ public class PostComment extends PanacheEntityBase {
 
     @Column(name = "body", nullable = false, length = 2000)
     public String body;
+
+    @Lob
+    @JdbcTypeCode(SqlTypes.BLOB)
+    @Column(name = "media_oid", columnDefinition = "oid")
+    public Blob mediaOid;
+
+    @Column(name = "image_description", length = 240)
+    public String imageDescription;
 
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;

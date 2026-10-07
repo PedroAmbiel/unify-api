@@ -27,6 +27,14 @@ public record UserPostResponse(
         long commentsCount,
         boolean likedByCurrentUser,
         boolean commentedByCurrentUser,
-        FeedSource feedSource
+        FeedSource feedSource,
+        String imageDescription
 ) {
+    public UserPostResponse(UUID id, PostOrigin origin, UserPostCommunityResponse community,
+            UserPostAuthorResponse author, String body, String mediaUrl, Instant createdAt,
+            Instant editedAt, long likesCount, long commentsCount, boolean likedByCurrentUser,
+            boolean commentedByCurrentUser, FeedSource feedSource) {
+        this(id, origin, community, author, body, mediaUrl, createdAt, editedAt, likesCount,
+                commentsCount, likedByCurrentUser, commentedByCurrentUser, feedSource, null);
+    }
 }
