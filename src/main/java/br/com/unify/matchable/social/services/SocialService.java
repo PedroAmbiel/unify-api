@@ -73,5 +73,14 @@ public interface SocialService {
 
     byte[] getPostMedia(User currentUser, UUID postId);
 
+    /**
+     * Um post só, pessoal OU de comunidade, no mesmo formato do feed (deep
+     * link de notificação de curtida/comentário). 404 genérico quando a pessoa
+     * não pode ver: post pessoal segue {@code requireVisiblePersonalPost};
+     * post de comunidade exige comunidade pública ou ser membro, e nunca de
+     * alguém bloqueado.
+     */
+    UserPostResponse getPost(User currentUser, UUID postId);
+
     UserFeedPageResponse listPostsByProfile(User currentUser, UUID userProfileId, Integer page, Integer size);
 }

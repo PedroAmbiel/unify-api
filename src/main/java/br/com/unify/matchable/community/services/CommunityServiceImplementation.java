@@ -14,6 +14,7 @@ import br.com.unify.matchable.common.dto.PageParams;
 import br.com.unify.matchable.common.dto.PageResponse;
 import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.common.image.OidImageService;
+import br.com.unify.matchable.notification.services.NotificationService;
 import br.com.unify.matchable.community.dto.CommunityAuthorResponse;
 import br.com.unify.matchable.community.dto.CommunityCategoryResponse;
 import br.com.unify.matchable.community.dto.CommunityCommentResponse;
@@ -86,6 +87,9 @@ public class CommunityServiceImplementation implements CommunityService {
 
     @Inject
     OidImageService oidImageService;
+
+    @Inject
+    NotificationService notificationService;
 
     @Override
     public List<CommunityCategoryResponse> listCategories() {
@@ -609,6 +613,7 @@ public class CommunityServiceImplementation implements CommunityService {
             like.user = user;
             like.createdAt = Instant.now();
             like.persist();
+            notificationService.emitPostLiked(post.author, user, post.id, post.community.id);
         }
 
         return new CommunityLikeResponse(post.id, PostLike.countByPost(post), true);
@@ -682,6 +687,7 @@ public class CommunityServiceImplementation implements CommunityService {
         comment.createdAt = Instant.now();
         comment.persist();
 
+        notificationService.emitPostCommented(post.author, user, post.id, post.community.id, comment.body);
         return toCommentResponse(comment, user);
     }
 

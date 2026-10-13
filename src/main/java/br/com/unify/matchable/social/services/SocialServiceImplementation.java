@@ -15,8 +15,11 @@ import br.com.unify.matchable.common.dto.PageParams;
 import br.com.unify.matchable.common.dto.PageResponse;
 import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.common.image.OidImageService;
+import br.com.unify.matchable.notification.enums.NotificationType;
+import br.com.unify.matchable.notification.services.NotificationService;
 import br.com.unify.matchable.community.entity.Community;
 import br.com.unify.matchable.community.entity.CommunityMembership;
+import br.com.unify.matchable.community.enums.CommunityPrivacy;
 import br.com.unify.matchable.post.entity.Post;
 import br.com.unify.matchable.post.entity.PostComment;
 import br.com.unify.matchable.post.entity.PostLike;
@@ -98,6 +101,9 @@ public class SocialServiceImplementation implements SocialService {
     @Inject
     UserBlockService userBlockService;
 
+    @Inject
+    NotificationService notificationService;
+
     // ------------------------------------------------------------- follow
 
     @Override
@@ -128,11 +134,13 @@ public class SocialServiceImplementation implements SocialService {
                 request.target = followed;
                 request.createdAt = Instant.now();
                 request.persist();
+                notificationService.emitFollowRequest(followed.user, currentUser, follower.id);
             }
             return toActionResponse(follower, followed, false, true);
         }
 
         createFollow(follower, followed);
+        notificationService.emitNewFollower(followed.user, currentUser, follower.id);
         return toActionResponse(follower, followed, true, false);
     }
 
@@ -183,7 +191,9 @@ public class SocialServiceImplementation implements SocialService {
         request.delete();
         if (UserFollow.findPair(requester, me) == null) {
             createFollow(requester, me);
+            notificationService.emitFollowRequestAccepted(requester.user, currentUser, me.id);
         }
+        notificationService.markReadByReference(currentUser, NotificationType.FOLLOW_REQUEST, requester.id);
     }
 
     @Override
@@ -197,6 +207,8 @@ public class SocialServiceImplementation implements SocialService {
             throw new NoSuchElementException(FOLLOW_REQUEST_NOT_FOUND_MESSAGE);
         }
         request.delete();
+        // Recusado (ou cancelado por quem pediu): o aviso do pedido perde o sentido.
+        notificationService.markReadByReference(request.target.user, NotificationType.FOLLOW_REQUEST, request.requester.id);
     }
 
     @Override
@@ -211,7 +223,9 @@ public class SocialServiceImplementation implements SocialService {
             request.delete();
             if (UserFollow.findPair(requester, me) == null) {
                 createFollow(requester, me);
+                notificationService.emitFollowRequestAccepted(requester.user, currentUser, me.id);
             }
+            notificationService.markReadByReference(currentUser, NotificationType.FOLLOW_REQUEST, requester.id);
         }
     }
 
@@ -449,6 +463,8 @@ public class SocialServiceImplementation implements SocialService {
             like.user = currentUser;
             like.createdAt = Instant.now();
             like.persist();
+            // Curtir o próprio post não avisa; curtir/descurtir/curtir não repete (dedupe).
+            notificationService.emitPostLiked(post.author, currentUser, post.id, null);
         }
 
         return new UserPostLikeResponse(post.id, PostLike.countByPost(post), true);
@@ -504,6 +520,7 @@ public class SocialServiceImplementation implements SocialService {
         comment.createdAt = Instant.now();
         comment.persist();
 
+        notificationService.emitPostCommented(post.author, currentUser, post.id, null, comment.body);
         return toCommentResponse(comment, currentUser);
     }
 
@@ -536,6 +553,26 @@ public class SocialServiceImplementation implements SocialService {
             throw new NoSuchElementException(POST_MEDIA_NOT_FOUND_MESSAGE);
         }
         return oidImageService.readOidBlob(post.mediaOid);
+    }
+
+    @Override
+    public UserPostResponse getPost(User currentUser, UUID postId) {
+        if (postId == null) {
+            throw new IllegalArgumentException(POST_NOT_FOUND_MESSAGE);
+        }
+
+        Post communityPost = Post.findByIdWithActiveCommunity(postId);
+        if (communityPost == null) {
+            return toPostResponse(requireVisiblePersonalPost(currentUser, postId), currentUser);
+        }
+
+        Community community = communityPost.community;
+        boolean member = CommunityMembership.findByCommunityAndUser(community, currentUser) != null;
+        boolean readable = member || community.privacy == CommunityPrivacy.PUBLIC;
+        if (!readable || isBlocked(currentUser, communityPost.author)) {
+            throw new NoSuchElementException(POST_NOT_FOUND_MESSAGE);
+        }
+        return toPostResponse(communityPost, currentUser);
     }
 
     @Override

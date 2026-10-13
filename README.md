@@ -31,6 +31,49 @@ Projeto Aplicado — Semestre 7 (PUC). API do Unify (Quarkus 3.32 / Java 25 / Po
 
 4. **Swagger UI**: http://localhost:8080/q/swagger-ui
 
+5. **Push (opcional)** — ver [Notificações push](#notificações-push-firebase-cloud-messaging).
+   Sem a conta de serviço do Firebase a API sobe normalmente; só o push fica
+   desligado (as notificações in-app continuam).
+
+## Notificações push (Firebase Cloud Messaging)
+
+Semana 05. O backend envia push **direto ao FCM HTTP v1** (sem SDK do Firebase
+e sem o serviço de push do Expo): `notification/push/FcmPushGateway` assina um
+JWT com a conta de serviço, troca por um access token OAuth2 e chama
+`POST https://fcm.googleapis.com/v1/projects/{projectId}/messages:send`.
+
+1. Firebase Console → ⚙ **Configurações do projeto** → aba **Contas de serviço**
+   → **Gerar nova chave privada** → confirmar. O navegador baixa um JSON.
+2. Salve o arquivo como `secrets/firebase-service-account.json` (a pasta
+   `secrets/` é ignorada pelo git). Outro caminho: `FIREBASE_SERVICE_ACCOUNT_FILE`.
+3. Suba a API. O log deve mostrar `Push FCM ligado para o projeto Firebase '<id>'`.
+   Sem o arquivo aparece `Push desligado: conta de serviço do Firebase não encontrada`.
+
+> ⚠️ A conta de serviço é **segredo**: dá permissão de enviar push em nome do
+> projeto. Nunca versione, nunca cole em issue/chat. Se vazar: Firebase →
+> Contas de serviço → Gerenciar permissões (Google Cloud) → apagar a chave.
+> O `google-services.json` do app **não** serve aqui (o backend recusa com uma
+> mensagem explicando).
+
+Como funciona:
+
+| Peça | Papel |
+|---|---|
+| `NotificationService.emit*` | Grava a notificação na MESMA transação do evento (match, mensagem, follow, curtida, comentário). Nunca avisa a própria pessoa nem um par bloqueado; deduplica curtir/descurtir/curtir (`unify.notification.dedupe-window-hours`); agrupa mensagens não lidas da mesma conversa. |
+| `PushNotificationDispatcher` | Observa o evento com `AFTER_SUCCESS` (rollback = sem push) e agenda numa virtual thread — a resposta HTTP não espera o FCM. |
+| `PushDispatchService` | Lê a notificação + tokens numa transação curta, envia fora de transação e apaga tokens mortos (`UNREGISTERED`, `SENDER_ID_MISMATCH`, token inválido). |
+| `FcmPushGateway` | Mensagem *data-only* de alta prioridade (`title`, `message`, `body` JSON, `channelId`, `tag`) — o formato que o `expo-notifications` desenha igual com o app aberto, em segundo plano ou fechado. |
+
+Endpoints: `GET /notifications`, `GET /notifications/unread-count`,
+`PUT /notifications/{id}/read`, `PUT /notifications/read-all`,
+`POST /notifications/push-tokens` (`{token, platform}` → `{id}`),
+`DELETE /notifications/push-tokens/{id}` e `GET /users/posts/{postId}` (post
+único, destino das notificações de curtida/comentário).
+
+Na suíte de testes o push fica desligado (`%test.unify.push.enabled=false`);
+`FcmPushGatewayTest` sobe um servidor HTTP falso (token + `messages:send`) e
+`PushDispatchServiceTest` troca o gateway por um stub (`QuarkusMock`).
+
 ## Migrações
 
 O schema é versionado com Flyway em `src/main/resources/db/migration`.

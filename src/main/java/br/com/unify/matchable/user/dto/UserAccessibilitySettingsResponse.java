@@ -6,6 +6,7 @@ public record UserAccessibilitySettingsResponse(
         FontScaleOption fontScale,
         Double fontScaleMultiplier,
         boolean highContrast,
-        boolean reduceMotion
+        boolean reduceMotion,
+        boolean autoplayPresentationAudio
 ) {
 }

@@ -320,6 +320,25 @@ public class SocialResource extends AuthenticatedResource {
         }
     }
 
+    /** Post único (pessoal ou de comunidade): destino das notificações de curtida/comentário. */
+    @GET
+    @Path("/posts/{postId}")
+    @Transactional
+    public Response getPost(@PathParam("postId") UUID postId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            return Response.ok(socialService.getPost(user, postId)).build();
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
     @PUT
     @Path("/posts/{postId}")
     @Consumes(MediaType.APPLICATION_JSON)

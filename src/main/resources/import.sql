@@ -55,6 +55,11 @@ create index if not exists ix_posts_personal_author_created
     on posts (fk_user, created_at desc, id desc)
     where origin = 'PERSONAL' and active = true;
 
+-- Semana 05 (espelha V21): badge de não lidas do sino.
+create index if not exists idx_notifications_recipient_unread
+    on notifications (fk_recipient_user)
+    where read_at is null;
+
 insert into genders(id, description)
 values (1, 'Mulher'),
        (2, 'Homem'),

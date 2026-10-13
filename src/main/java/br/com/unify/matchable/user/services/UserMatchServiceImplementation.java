@@ -29,6 +29,7 @@ import org.hibernate.Hibernate;
 
 import br.com.unify.matchable.common.UUIDv7Generator;
 import br.com.unify.matchable.common.dto.PageParams;
+import br.com.unify.matchable.notification.services.NotificationService;
 import br.com.unify.matchable.user.dto.MatchDecisionRequest;
 import br.com.unify.matchable.user.dto.MatchDecisionResponse;
 import br.com.unify.matchable.user.dto.MutualMatchPageResponse;
@@ -90,6 +91,9 @@ public class UserMatchServiceImplementation implements UserMatchService {
 
     @Inject
     EntityManager entityManager;
+
+    @Inject
+    NotificationService notificationService;
 
     @ConfigProperty(name = "unify.match.default-max-distance-km", defaultValue = "60")
     int defaultMaxDistanceKm = 60;
@@ -250,6 +254,8 @@ public class UserMatchServiceImplementation implements UserMatchService {
                 if (!accepted) {
                     pairMatch.declinedAt = now;
                     pairMatch.declinedByProfile = currentProfile;
+                } else if (pairMatch.starterAccepted) {
+                    notifyMutualMatch(pairMatch);
                 }
                 return toDecisionResponse(pairMatch);
             }
@@ -273,6 +279,21 @@ public class UserMatchServiceImplementation implements UserMatchService {
 
         possibleMatch.persist();
         return toDecisionResponse(possibleMatch);
+    }
+
+    /**
+     * Match mútuo acabou de fechar (quem recebeu o convite aceitou): os DOIS
+     * lados recebem {@code NEW_MATCH}. Único ponto em que um par vira mútuo —
+     * {@link #restartPair} sempre reabre com {@code pendingAccepted = null}.
+     */
+    private void notifyMutualMatch(UserPossibleMatch match) {
+        UserProfile starter = match.starterProfile;
+        UserProfile pending = match.pendingProfile;
+        if (starter == null || pending == null) {
+            return;
+        }
+        notificationService.emitNewMatch(starter.user, pending.user, match.id, pending.id);
+        notificationService.emitNewMatch(pending.user, starter.user, match.id, starter.id);
     }
 
     /**

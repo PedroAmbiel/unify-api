@@ -38,6 +38,13 @@ public class UserAccessibilitySettings extends PanacheEntityBase {
     @Column(name = "reduce_motion", nullable = false)
     public boolean reduceMotion = false;
 
+    /**
+     * Opt-in (V22): tocar o áudio de apresentação sozinho no Encontros, depois
+     * da fala do perfil. O app nunca toca com TalkBack/VoiceOver ativo.
+     */
+    @Column(name = "autoplay_presentation_audio", nullable = false)
+    public boolean autoplayPresentationAudio = false;
+
     @Column(name = "last_updated_at", nullable = false)
     public Instant lastUpdatedAt;
 

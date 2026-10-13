@@ -26,6 +26,8 @@ import br.com.unify.matchable.chat.enums.ChatMessageType;
 import br.com.unify.matchable.common.UUIDv7Generator;
 import br.com.unify.matchable.common.exceptions.ForbiddenException;
 import br.com.unify.matchable.common.image.OidImageService;
+import br.com.unify.matchable.notification.enums.NotificationType;
+import br.com.unify.matchable.notification.services.NotificationService;
 import br.com.unify.matchable.user.dto.UserProfileImageResponse;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserPossibleMatch;
@@ -73,6 +75,9 @@ public class ChatServiceImplementation implements ChatService {
 
     @Inject
     UserBlockService userBlockService;
+
+    @Inject
+    NotificationService notificationService;
 
     // ================= listagem =================
 
@@ -253,6 +258,7 @@ public class ChatServiceImplementation implements ChatService {
         message.persist();
 
         conversation.lastMessageAt = message.createdAt;
+        notifyRecipient(conversation, currentProfile, normalizedBody);
 
         return toMessageResponse(message, currentProfile);
     }
@@ -278,6 +284,7 @@ public class ChatServiceImplementation implements ChatService {
         message.persist();
 
         conversation.lastMessageAt = message.createdAt;
+        notifyRecipient(conversation, currentProfile, describeMediaForNotification(message));
 
         return toMessageResponse(message, currentProfile);
     }
@@ -313,6 +320,8 @@ public class ChatServiceImplementation implements ChatService {
 
         Instant readAt = Instant.now();
         long marked = ChatMessage.markAsRead(conversation, currentProfile, readAt);
+        // Leu a conversa: o aviso agrupado dela sai do sino também.
+        notificationService.markReadByReference(user, NotificationType.NEW_MESSAGE, conversation.id);
 
         return new ChatReadResponse(conversation.id, marked, readAt);
     }
@@ -410,6 +419,36 @@ public class ChatServiceImplementation implements ChatService {
         message.editedAt = null;
         message.deletedAt = null;
         return message;
+    }
+
+    /**
+     * Aviso de mensagem nova para o outro participante. Bloqueio já barrou o
+     * envio antes ({@link #requireNotBlocked}); o serviço de notificação ainda
+     * confere o par (ponto único dele).
+     */
+    private void notifyRecipient(Conversation conversation, UserProfile senderProfile, String preview) {
+        UserProfile recipientProfile = conversation.otherParticipant(senderProfile);
+        if (recipientProfile == null || recipientProfile.user == null) {
+            return;
+        }
+        notificationService.emitNewMessage(
+                recipientProfile.user,
+                senderProfile.user,
+                conversation.id,
+                senderProfile.id,
+                preview
+        );
+    }
+
+    /** Texto do aviso para mídia (o conteúdo binário nunca vai para a notificação). */
+    static String describeMediaForNotification(ChatMessage message) {
+        String caption = message.body == null || message.body.isBlank() ? null : message.body.trim();
+        return switch (message.type) {
+            case IMAGE -> caption == null ? "Enviou uma imagem" : "Enviou uma imagem: " + caption;
+            case AUDIO -> "Enviou uma mensagem de voz";
+            case VIDEO -> "Enviou um vídeo";
+            case TEXT -> caption == null ? "Nova mensagem" : caption;
+        };
     }
 
     /** Ponto ÚNICO de verificação de autorização de conversa. Toda operação passa por aqui. */

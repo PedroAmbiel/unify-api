@@ -439,6 +439,12 @@ class SocialResourceTest {
         }
 
         @Override
+        public UserPostResponse getPost(User currentUser, UUID postId) {
+            maybeThrow();
+            return null;
+        }
+
+        @Override
         public UserFeedPageResponse listPostsByProfile(User currentUser, UUID userProfileId, Integer page, Integer size) {
             maybeThrow();
             return feedResponse;

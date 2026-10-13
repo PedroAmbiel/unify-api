@@ -48,7 +48,11 @@ class RoutingContractTest {
             "/users/me/profile/audio/" + SAMPLE_UUID,
             "/users/me/profile/public/audio/" + SAMPLE_UUID + "?userProfileId=" + SAMPLE_UUID,
             "/users/follow-requests",
-            "/users/follow-requests/sent"
+            "/users/follow-requests/sent",
+            // semana 05 — notificações e post único (deep link)
+            "/notifications",
+            "/notifications/unread-count",
+            "/users/posts/" + SAMPLE_UUID
     })
     void protectedGetRouteRespondsUnauthorizedNotNotFound(String path) {
         given()
@@ -92,6 +96,13 @@ class RoutingContractTest {
                 .when().post("/users/follow-requests/" + SAMPLE_UUID + "/accept")
                 .then()
                 .statusCode(equalTo(401));
+
+        given()
+                .contentType(ContentType.JSON)
+                .body("{}")
+                .when().post("/notifications/push-tokens")
+                .then()
+                .statusCode(equalTo(401));
     }
 
     /** PUT com o Content-Type que cada rota consome (415 antes de 401, ver acima). */
@@ -109,6 +120,17 @@ class RoutingContractTest {
                 .when().put("/users/me/profile/audio")
                 .then()
                 .statusCode(equalTo(401));
+
+        // Sem corpo e sem @Consumes: PUT puro também precisa dar 401 (nunca 415/404).
+        given()
+                .when().put("/notifications/read-all")
+                .then()
+                .statusCode(equalTo(401));
+
+        given()
+                .when().put("/notifications/" + SAMPLE_UUID + "/read")
+                .then()
+                .statusCode(equalTo(401));
     }
 
     @ParameterizedTest
@@ -117,7 +139,8 @@ class RoutingContractTest {
             "/users/posts/" + SAMPLE_UUID,
             "/users/" + SAMPLE_UUID + "/block",
             "/users/me/profile/audio",
-            "/users/follow-requests/" + SAMPLE_UUID
+            "/users/follow-requests/" + SAMPLE_UUID,
+            "/notifications/push-tokens/" + SAMPLE_UUID
     })
     void protectedDeleteRouteRespondsUnauthorizedNotNotFound(String path) {
         given()
