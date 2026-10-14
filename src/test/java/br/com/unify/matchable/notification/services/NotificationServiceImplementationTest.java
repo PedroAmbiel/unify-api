@@ -10,9 +10,18 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.function.IntFunction;
 
 import org.junit.jupiter.api.Test;
 
@@ -26,6 +35,7 @@ import br.com.unify.matchable.notification.entity.Notification;
 import br.com.unify.matchable.notification.entity.UserPushToken;
 import br.com.unify.matchable.notification.enums.NotificationType;
 import br.com.unify.matchable.notification.enums.PushPlatform;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -189,6 +199,57 @@ class NotificationServiceImplementationTest {
         assertEquals(1L, UserPushToken.count("token", "fcm-token-1"));
         assertEquals(beto.user().id, UserPushToken.findByToken("fcm-token-1").user.id);
         assertTrue(UserPushToken.listByUser(ana.user()).isEmpty());
+    }
+
+    /**
+     * No primeiro boot o app manda o mesmo token duas vezes quase juntas
+     * (registro inicial + listener de rotação). Cada chamada roda na própria
+     * transação, como duas requisições: nenhuma pode estourar
+     * uq_user_push_tokens_token. Sem {@code @TestTransaction} porque as
+     * transações precisam ser independentes (dados ficam commitados).
+     *
+     * <p>Corrida depende de timing: aquece uma conexão por thread antes e
+     * repete várias rodadas para a disputa acontecer de fato.
+     */
+    @Test
+    void concurrentRegistrationOfTheSameTokenKeepsOneRow() throws Exception {
+        Person ana = QuarkusTransaction.requiringNew().call(() -> person("Ana"));
+        int threads = 8;
+        int rounds = 20;
+        ExecutorService executor = Executors.newFixedThreadPool(threads);
+        try {
+            raceRegistrations(executor, threads, i -> "fcm-warmup-" + UUID.randomUUID(), ana);
+
+            for (int round = 0; round < rounds; round++) {
+                String token = "fcm-race-" + UUID.randomUUID();
+                Set<UUID> ids = raceRegistrations(executor, threads, i -> token, ana);
+
+                assertEquals(1, ids.size(), "todas as chamadas devolvem a mesma linha");
+                assertEquals(1L, QuarkusTransaction.requiringNew().call(() -> UserPushToken.count("token", token)));
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private Set<UUID> raceRegistrations(
+            ExecutorService executor, int threads, IntFunction<String> tokenOf, Person owner) throws Exception {
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<PushTokenResponse>> responses = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            String token = tokenOf.apply(i);
+            responses.add(executor.submit(() -> {
+                start.await();
+                return service.registerPushToken(owner.user(), new PushTokenRegisterRequest(token, "ANDROID"));
+            }));
+        }
+        start.countDown();
+
+        Set<UUID> ids = new HashSet<>();
+        for (Future<PushTokenResponse> response : responses) {
+            ids.add(response.get(30, TimeUnit.SECONDS).id());
+        }
+        return ids;
     }
 
     @Test

@@ -36,6 +36,7 @@ import io.quarkus.panache.common.Page;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
 
 @ApplicationScoped
@@ -70,6 +71,9 @@ public class NotificationServiceImplementation implements NotificationService {
 
     @Inject
     Event<NotificationDispatchEvent> dispatchEvent;
+
+    @Inject
+    EntityManager entityManager;
 
     // ------------------------------------------------------------ caixa de entrada
 
@@ -141,26 +145,30 @@ public class NotificationServiceImplementation implements NotificationService {
             throw new IllegalArgumentException(PUSH_PLATFORM_INVALID_MESSAGE);
         }
 
+        // Upsert atômico no banco. "Buscar e depois inserir" quebrava quando o
+        // app mandava o mesmo token duas vezes ao mesmo tempo (registro inicial
+        // + listener de rotação no primeiro boot): as duas requisições não
+        // achavam a linha e a segunda violava uq_user_push_tokens_token.
+        // Mesmo aparelho, outra conta (ou reinstalação): o token muda de dono.
+        // Quem logou por último é quem recebe.
         Instant now = Instant.now();
-        UserPushToken existing = UserPushToken.findByToken(token);
-        if (existing != null) {
-            // Mesmo aparelho, outra conta (ou reinstalação): o token muda de
-            // dono. Quem logou por último é quem recebe.
-            existing.user = user;
-            existing.platform = platform;
-            existing.updatedAt = now;
-            return toTokenResponse(existing);
-        }
-
-        UserPushToken pushToken = new UserPushToken();
-        pushToken.id = UUIDv7Generator.generate();
-        pushToken.user = user;
-        pushToken.token = token;
-        pushToken.platform = platform;
-        pushToken.createdAt = now;
-        pushToken.updatedAt = now;
-        pushToken.persist();
-        return toTokenResponse(pushToken);
+        Object id = entityManager.createNativeQuery("""
+                insert into user_push_tokens (id, fk_user, token, platform, created_at, updated_at)
+                values (:id, :userId, :token, :platform, :now, :now)
+                on conflict (token) do update
+                    set fk_user = excluded.fk_user,
+                        platform = excluded.platform,
+                        updated_at = excluded.updated_at
+                returning id
+                """)
+                .setParameter("id", UUIDv7Generator.generate())
+                .setParameter("userId", user.id)
+                .setParameter("token", token)
+                .setParameter("platform", platform.name())
+                .setParameter("now", now)
+                .getSingleResult();
+        UUID pushTokenId = id instanceof UUID uuid ? uuid : UUID.fromString(id.toString());
+        return new PushTokenResponse(pushTokenId, platform, now);
     }
 
     @Override
@@ -432,10 +440,6 @@ public class NotificationServiceImplementation implements NotificationService {
                         userIds)
                 .project(UUID.class)
                 .list());
-    }
-
-    private PushTokenResponse toTokenResponse(UserPushToken pushToken) {
-        return new PushTokenResponse(pushToken.id, pushToken.platform, pushToken.updatedAt);
     }
 
     /** Nome exibível SEM fallback para e-mail (o aviso aparece na tela bloqueada). */
