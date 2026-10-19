@@ -743,7 +743,9 @@ public class SocialServiceImplementation implements SocialService {
                 commentsCount,
                 likedByCurrentUser,
                 commentedByCurrentUser,
-                feedSource
+                feedSource,
+                // Personal posts keep author text in body; the column holds a reusable AI description.
+                post.mediaOid == null ? null : post.imageDescription
         );
     }
 

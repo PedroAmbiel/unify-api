@@ -437,7 +437,8 @@ public class CommunityResource extends AuthenticatedResource {
     public Response createPost(
             @QueryParam("communityId") UUID communityId,
             @RestForm("body") String body,
-            @RestForm("image") FileUpload image
+            @RestForm("image") FileUpload image,
+            @RestForm("imageDescription") String imageDescription
     ) {
         User user = findCurrentUser();
         if (user == null) {
@@ -446,7 +447,7 @@ public class CommunityResource extends AuthenticatedResource {
 
         try {
             return Response.status(Response.Status.CREATED)
-                    .entity(communityService.createPost(user, communityId, body, readOptionalUploadedBytes(image)))
+                    .entity(communityService.createPost(user, communityId, body, readOptionalUploadedBytes(image), imageDescription))
                     .build();
         } catch (PayloadTooLargeException exception) {
             return payloadTooLargeResponse(exception.getMessage());
@@ -457,6 +458,40 @@ public class CommunityResource extends AuthenticatedResource {
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }
+    }
+
+    /** Java compatibility for existing callers; HTTP uses the multipart overload. */
+    public Response createPost(UUID communityId, String body, FileUpload image) {
+        return createPost(communityId, body, image, null);
+    }
+
+    @GET
+    @Path("/posts/{postId}")
+    public Response getPost(@PathParam("postId") UUID postId) {
+        User user = findCurrentUser();
+        if (user == null) return userNotFoundResponse();
+        try { return Response.ok(communityService.getPost(user, postId)).build(); }
+        catch (IllegalArgumentException e) { return validationErrorResponse(e.getMessage()); }
+        catch (NoSuchElementException e) { return resourceNotFoundResponse(e.getMessage()); }
+    }
+
+    @PUT
+    @Path("/posts/{postId}/media")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Transactional
+    public Response updatePostMedia(@PathParam("postId") UUID postId,
+            @RestForm("body") String body, @RestForm("image") FileUpload image,
+            @RestForm("removeImage") boolean removeImage,
+            @RestForm("imageDescription") String description) {
+        User user = findCurrentUser();
+        if (user == null) return userNotFoundResponse();
+        try { return Response.ok(communityService.updatePostMedia(user, postId, body,
+                readOptionalUploadedBytes(image), removeImage, description)).build(); }
+        catch (PayloadTooLargeException e) { return payloadTooLargeResponse(e.getMessage()); }
+        catch (IllegalArgumentException e) { return validationErrorResponse(e.getMessage()); }
+        catch (IllegalStateException e) { return conflictResponse(e.getMessage()); }
+        catch (ForbiddenException e) { return forbiddenResponse(e.getMessage()); }
+        catch (NoSuchElementException e) { return resourceNotFoundResponse(e.getMessage()); }
     }
 
     @PUT
@@ -470,7 +505,7 @@ public class CommunityResource extends AuthenticatedResource {
         }
 
         try {
-            return Response.ok(communityService.updatePost(user, postId, request == null ? null : request.body())).build();
+            return Response.ok(communityService.updatePost(user, postId, request == null ? null : request.body(), request == null ? null : request.getImageDescription(), request != null && request.isDescriptionPresent())).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
@@ -594,6 +629,7 @@ public class CommunityResource extends AuthenticatedResource {
     @POST
     @Path("/posts/{postId}/comments")
     @Transactional
+    @Consumes(MediaType.APPLICATION_JSON)
     public Response createComment(@PathParam("postId") UUID postId, CommunityCommentCreateRequest request) {
         User user = findCurrentUser();
         if (user == null) {
@@ -609,6 +645,43 @@ public class CommunityResource extends AuthenticatedResource {
             return validationErrorResponse(exception.getMessage());
         } catch (IllegalStateException exception) {
             return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @POST
+    @Path("/posts/{postId}/comments")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Transactional
+    public Response createCommentWithImage(@PathParam("postId") UUID postId,
+            @RestForm("body") String body, @RestForm("image") FileUpload image,
+            @RestForm("imageDescription") String description) {
+        User user = findCurrentUser();
+        if (user == null) return userNotFoundResponse();
+        try {
+            return Response.status(Response.Status.CREATED)
+                    .entity(communityService.createComment(user, postId, body, readOptionalUploadedBytes(image), description)).build();
+        } catch (PayloadTooLargeException exception) {
+            return payloadTooLargeResponse(exception.getMessage());
+        } catch (IllegalArgumentException exception) {
+            return validationErrorResponse(exception.getMessage());
+        } catch (IllegalStateException exception) {
+            return conflictResponse(exception.getMessage());
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
+        }
+    }
+
+    @GET
+    @Path("/posts/{postId}/comments/{commentId}/media")
+    @Produces("image/jpeg")
+    @Transactional
+    public Response getCommentMedia(@PathParam("postId") UUID postId, @PathParam("commentId") UUID commentId) {
+        User user = findCurrentUser();
+        if (user == null) return userNotFoundResponse();
+        try {
+            return ImageResponses.jpeg(communityService.getCommentMedia(user, postId, commentId), request);
         } catch (NoSuchElementException exception) {
             return resourceNotFoundResponse(exception.getMessage());
         }

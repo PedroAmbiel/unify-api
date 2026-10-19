@@ -553,14 +553,21 @@ public class CommunityServiceImplementation implements CommunityService {
     @Override
     @Transactional
     public CommunityPostResponse createPost(User user, UUID communityId, String body, byte[] imageBytes) {
-        Community community = requireMembership(communityId, user);
+        return createPost(user, communityId, body, imageBytes, null);
+    }
 
+    @Override
+    @Transactional
+    public CommunityPostResponse createPost(User user, UUID communityId, String body, byte[] imageBytes, String description) {
+        Community community = requireMembership(communityId, user);
+        String normalizedDescription = PostImageDescription.normalize(description, imageBytes != null && imageBytes.length > 0);
         Post post = new Post();
         post.id = UUIDv7Generator.generate();
         post.community = community;
         post.author = user;
         post.body = requireText(body, POST_BODY_REQUIRED_MESSAGE);
         post.createdAt = Instant.now();
+        post.imageDescription = normalizedDescription;
         if (imageBytes != null && imageBytes.length > 0) {
             post.mediaOid = oidImageService.toOidBlob(oidImageService.compressToJpeg(imageBytes));
         }
@@ -572,16 +579,52 @@ public class CommunityServiceImplementation implements CommunityService {
     @Override
     @Transactional
     public CommunityPostResponse updatePost(User user, UUID postId, String body) {
+        return updatePost(user, postId, body, null, false);
+    }
+
+    @Override
+    public CommunityPostResponse getPost(User user, UUID postId) {
+        Post post = requirePost(postId);
+        requireReadableCommunity(post.community, user);
+        return toPostResponse(post, user);
+    }
+
+    private Post requireEditablePost(User user, UUID postId) {
         Post post = requirePost(postId);
         requireMembership(post.community, user);
-        if (!isContentOwner(user, post.author)) {
-            throw new ForbiddenException(POST_UPDATE_FORBIDDEN_MESSAGE);
-        }
+        if (!isContentOwner(user, post.author)) throw new ForbiddenException(POST_UPDATE_FORBIDDEN_MESSAGE);
+        return post;
+    }
 
-        // Só o texto muda; a imagem fica como está.
-        post.body = requireText(body, POST_BODY_REQUIRED_MESSAGE);
+    @Override
+    @Transactional
+    public CommunityPostResponse updatePost(User user, UUID postId, String body, String description, boolean descriptionPresent) {
+        Post post = requireEditablePost(user, postId);
+        if (body == null && !descriptionPresent) throw new IllegalArgumentException(POST_BODY_REQUIRED_MESSAGE);
+        String normalizedBody = body == null ? post.body : requireText(body, POST_BODY_REQUIRED_MESSAGE);
+        String normalizedDescription = descriptionPresent
+                ? PostImageDescription.normalize(description, post.mediaOid != null) : post.imageDescription;
+        post.body = normalizedBody;
+        post.imageDescription = normalizedDescription;
         post.editedAt = Instant.now();
+        return toPostResponse(post, user);
+    }
 
+    @Override
+    @Transactional
+    public CommunityPostResponse updatePostMedia(User user, UUID postId, String body, byte[] imageBytes, boolean removeImage, String description) {
+        Post post = requireEditablePost(user, postId);
+        boolean replacing = imageBytes != null && imageBytes.length > 0;
+        if (removeImage && replacing) throw new IllegalArgumentException("Escolha remover ou substituir a imagem");
+        String normalizedBody = requireText(body, POST_BODY_REQUIRED_MESSAGE);
+        boolean hasImage = !removeImage && (replacing || post.mediaOid != null);
+        String normalizedDescription = PostImageDescription.normalize(description, hasImage);
+        // Validate everything before changing the existing media.
+        if (replacing) post.mediaOid = oidImageService.toOidBlob(oidImageService.compressToJpeg(imageBytes));
+        else if (removeImage) post.mediaOid = null;
+        post.body = normalizedBody;
+        post.imageDescription = normalizedDescription;
+        post.editedAt = Instant.now();
         return toPostResponse(post, user);
     }
 
@@ -676,6 +719,12 @@ public class CommunityServiceImplementation implements CommunityService {
     @Override
     @Transactional
     public CommunityCommentResponse createComment(User user, UUID postId, String body) {
+        return createComment(user, postId, body, null, null);
+    }
+
+    @Override
+    @Transactional
+    public CommunityCommentResponse createComment(User user, UUID postId, String body, byte[] imageBytes, String description) {
         Post post = requirePost(postId);
         requireMembership(post.community, user);
 
@@ -683,7 +732,11 @@ public class CommunityServiceImplementation implements CommunityService {
         comment.id = UUIDv7Generator.generate();
         comment.post = post;
         comment.author = user;
-        comment.body = requireText(body, COMMENT_BODY_REQUIRED_MESSAGE);
+        boolean hasImage = imageBytes != null && imageBytes.length > 0;
+        CommunityCommentContent content = CommunityCommentContent.normalize(body, description, hasImage);
+        comment.body = content.body();
+        comment.imageDescription = content.imageDescription();
+        if (hasImage) comment.mediaOid = oidImageService.toOidBlob(oidImageService.compressToJpeg(imageBytes));
         comment.createdAt = Instant.now();
         comment.persist();
 
@@ -732,6 +785,16 @@ public class CommunityServiceImplementation implements CommunityService {
         }
 
         return oidImageService.readOidBlob(post.mediaOid);
+    }
+
+    @Override
+    public byte[] getCommentMedia(User user, UUID postId, UUID commentId) {
+        Post post = requirePost(postId);
+        requireReadableCommunity(post.community, user);
+        PostComment comment = PostComment.findByIdAndPost(commentId, post);
+        if (comment == null || comment.mediaOid == null)
+            throw new NoSuchElementException("Imagem do comentário não encontrada");
+        return oidImageService.readOidBlob(comment.mediaOid);
     }
 
     @Override
@@ -1013,7 +1076,8 @@ public class CommunityServiceImplementation implements CommunityService {
                 PostLike.countByPost(post),
                 PostComment.countByPost(post),
                 currentUser != null && PostLike.findByPostAndUser(post, currentUser) != null,
-                currentUser != null && PostComment.existsByPostAndUser(post, currentUser)
+                currentUser != null && PostComment.existsByPostAndUser(post, currentUser),
+                post.mediaOid == null ? null : post.imageDescription
         );
     }
 
@@ -1028,7 +1092,9 @@ public class CommunityServiceImplementation implements CommunityService {
                 toAuthorResponse(comment.author),
                 formatPublishedAt(comment.createdAt),
                 comment.body,
-                commentedByCurrentUser
+                commentedByCurrentUser,
+                comment.mediaOid == null ? null : "/communities/posts/" + comment.post.id + "/comments/" + comment.id + "/media",
+                comment.mediaOid == null ? null : comment.imageDescription
         );
     }
 
