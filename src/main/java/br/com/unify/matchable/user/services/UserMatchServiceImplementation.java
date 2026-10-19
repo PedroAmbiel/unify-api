@@ -29,6 +29,7 @@ import org.hibernate.Hibernate;
 
 import br.com.unify.matchable.common.UUIDv7Generator;
 import br.com.unify.matchable.common.dto.PageParams;
+import br.com.unify.matchable.notification.enums.NotificationType;
 import br.com.unify.matchable.notification.services.NotificationService;
 import br.com.unify.matchable.user.dto.MatchDecisionRequest;
 import br.com.unify.matchable.user.dto.MatchDecisionResponse;
@@ -67,6 +68,9 @@ public class UserMatchServiceImplementation implements UserMatchService {
     private static final int UNDISCLOSED_GENDER_ID = 4;
     private static final String MATCH_IMAGE_DOWNLOAD_URL_PREFIX = "/users/me/matches/images/";
     private static final String MATCH_IMAGE_NOT_FOUND_MESSAGE = "Imagem de match não encontrada";
+    private static final String MUTUAL_MATCH_NOT_FOUND_MESSAGE = "Match não encontrado";
+    /** Teto da fila "Deu match" por consulta: o app mostra uma tela por vez. */
+    private static final int UNSEEN_MUTUAL_MATCHES_LIMIT = 20;
 
     /**
      * Compatibilidade parcial entre tipos de conexão.
@@ -255,6 +259,11 @@ public class UserMatchServiceImplementation implements UserMatchService {
                     pairMatch.declinedAt = now;
                     pairMatch.declinedByProfile = currentProfile;
                 } else if (pairMatch.starterAccepted) {
+                    pairMatch.matchedAt = now;
+                    // Quem responde vê a comemoração na própria resposta
+                    // (mutualMatch = true); só o starter fica na fila "Deu match".
+                    pairMatch.pendingMatchSeenAt = now;
+                    pairMatch.starterMatchSeenAt = null;
                     notifyMutualMatch(pairMatch);
                 }
                 return toDecisionResponse(pairMatch);
@@ -335,6 +344,9 @@ public class UserMatchServiceImplementation implements UserMatchService {
         target.declinedAt = accepted ? null : now;
         target.declinedByProfile = accepted ? null : currentProfile;
         target.createdAt = now;
+        target.matchedAt = null;
+        target.starterMatchSeenAt = null;
+        target.pendingMatchSeenAt = null;
         return target;
     }
 
@@ -366,6 +378,45 @@ public class UserMatchServiceImplementation implements UserMatchService {
                 .map(match -> toMutualMatchSummaryResponse(currentProfile, match))
                 .toList();
         return toMutualMatchPageResponse(matches, resolvedPage, resolvedSize, totalElements);
+    }
+
+    @Override
+    public List<MutualMatchSummaryResponse> getUnseenMutualMatches(User user) {
+        UserProfile currentProfile = UserProfile.findByUser(user);
+        if (currentProfile == null) {
+            return List.of();
+        }
+
+        return UserPossibleMatch.listUnseenConfirmedForProfile(currentProfile, UNSEEN_MUTUAL_MATCHES_LIMIT).stream()
+                .map(match -> toMutualMatchSummaryResponse(currentProfile, match))
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public void markMutualMatchSeen(User user, UUID matchId) {
+        UserProfile currentProfile = UserProfile.findByUser(user);
+        UserPossibleMatch match = matchId == null ? null : UserPossibleMatch.findById(matchId);
+        boolean mutual = match != null && match.starterAccepted && Boolean.TRUE.equals(match.pendingAccepted);
+        boolean isStarter = mutual && currentProfile != null
+                && match.starterProfile != null && Objects.equals(match.starterProfile.id, currentProfile.id);
+        boolean isPending = mutual && currentProfile != null
+                && match.pendingProfile != null && Objects.equals(match.pendingProfile.id, currentProfile.id);
+
+        // Match de outras pessoas = "não existe" (404), igual a id inexistente.
+        if (!isStarter && !isPending) {
+            throw new NoSuchElementException(MUTUAL_MATCH_NOT_FOUND_MESSAGE);
+        }
+
+        Instant now = Instant.now();
+        if (isStarter && match.starterMatchSeenAt == null) {
+            match.starterMatchSeenAt = now;
+        }
+        if (isPending && match.pendingMatchSeenAt == null) {
+            match.pendingMatchSeenAt = now;
+        }
+        // Viu a comemoração: o aviso "Novo match!" do sino perde o sentido.
+        notificationService.markReadByReference(user, NotificationType.NEW_MATCH, match.id);
     }
 
     @Override

@@ -7,6 +7,7 @@ import br.com.unify.matchable.user.dto.MatchDecisionRequest;
 import br.com.unify.matchable.user.dto.MatchDecisionResponse;
 import br.com.unify.matchable.user.dto.MutualMatchPageResponse;
 import br.com.unify.matchable.user.dto.MutualMatchResponse;
+import br.com.unify.matchable.user.dto.MutualMatchSummaryResponse;
 import br.com.unify.matchable.user.dto.PotentialMatchesRequest;
 import br.com.unify.matchable.user.entity.User;
 
@@ -40,6 +41,21 @@ public interface UserMatchService {
     List<MutualMatchResponse> getMutualMatches(User user);
 
     MutualMatchPageResponse getMutualMatchesPage(User user, Integer page, Integer size);
+
+    /**
+     * Matches mútuos cuja tela "Deu match" o usuário ainda não viu (mais antigo
+     * primeiro). Quem respondeu o convite já sai visto: viu a comemoração na
+     * resposta do {@link #registerDecision}.
+     */
+    List<MutualMatchSummaryResponse> getUnseenMutualMatches(User user);
+
+    /**
+     * Registra que o usuário viu a tela "Deu match" deste par. Idempotente.
+     *
+     * @throws java.util.NoSuchElementException quando o match não existe, não é
+     *         mútuo ou não é do usuário
+     */
+    void markMutualMatchSeen(User user, UUID matchId);
 
     byte[] getMatchedProfileImage(User user, UUID imageId);
 }

@@ -180,6 +180,53 @@ class UserMatchResourceTest {
         assertEquals(imageId, service.capturedImageId);
     }
 
+    @Test
+    void getUnseenMutualMatchesReturnsTheCelebrationQueue() {
+        StubUserMatchService service = new StubUserMatchService();
+        UUID matchId = UUID.randomUUID();
+        service.unseenMutualMatchesResponse = List.of(new MutualMatchSummaryResponse(
+                matchId, UUID.randomUUID(), UUID.randomUUID(), "Bruno Lima", 31, null));
+
+        TestableUserMatchResource resource = new TestableUserMatchResource();
+        resource.userMatchService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.getUnseenMutualMatches();
+
+        assertEquals(200, response.getStatus());
+        List<?> body = assertInstanceOf(List.class, response.getEntity());
+        assertEquals(matchId, assertInstanceOf(MutualMatchSummaryResponse.class, body.getFirst()).matchId());
+        assertSame(resource.currentUser, service.capturedUser);
+    }
+
+    @Test
+    void markMutualMatchSeenReturnsNoContent() {
+        StubUserMatchService service = new StubUserMatchService();
+        TestableUserMatchResource resource = new TestableUserMatchResource();
+        resource.userMatchService = service;
+        resource.currentUser = buildUser();
+        UUID matchId = UUID.randomUUID();
+
+        Response response = resource.markMutualMatchSeen(matchId);
+
+        assertEquals(204, response.getStatus());
+        assertEquals(matchId, service.capturedSeenMatchId);
+    }
+
+    @Test
+    void markMutualMatchSeenReturnsNotFoundForSomeoneElsesMatch() {
+        StubUserMatchService service = new StubUserMatchService();
+        service.seenNotFound = new NoSuchElementException("Match não encontrado");
+        TestableUserMatchResource resource = new TestableUserMatchResource();
+        resource.userMatchService = service;
+        resource.currentUser = buildUser();
+
+        Response response = resource.markMutualMatchSeen(UUID.randomUUID());
+
+        assertEquals(404, response.getStatus());
+        assertEquals("RESOURCE_NOT_FOUND", assertInstanceOf(ErrorResponse.class, response.getEntity()).error());
+    }
+
     private User buildUser() {
         User user = new User();
         user.id = UUID.randomUUID();
@@ -200,6 +247,9 @@ class UserMatchResourceTest {
         private User capturedUser;
         private PotentialMatchesRequest capturedPotentialMatchesRequest;
         private UUID capturedImageId;
+        private UUID capturedSeenMatchId;
+        private List<MutualMatchSummaryResponse> unseenMutualMatchesResponse = List.of();
+        private NoSuchElementException seenNotFound;
         private Integer capturedPage;
         private Integer capturedSize;
         private List<UUID> discoveryResponse = List.of();
@@ -253,6 +303,21 @@ class UserMatchResourceTest {
                 throw pagedMutualMatchesValidation;
             }
             return mutualMatchesPageResponse;
+        }
+
+        @Override
+        public List<MutualMatchSummaryResponse> getUnseenMutualMatches(User user) {
+            this.capturedUser = user;
+            return unseenMutualMatchesResponse;
+        }
+
+        @Override
+        public void markMutualMatchSeen(User user, UUID matchId) {
+            this.capturedUser = user;
+            this.capturedSeenMatchId = matchId;
+            if (seenNotFound != null) {
+                throw seenNotFound;
+            }
         }
 
         @Override

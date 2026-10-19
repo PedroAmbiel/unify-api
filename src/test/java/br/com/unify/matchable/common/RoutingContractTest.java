@@ -30,6 +30,7 @@ class RoutingContractTest {
     @ValueSource(strings = {
             "/users/me/profile",
             "/users/me/matches/mutual",
+            "/users/me/matches/mutual/unseen",
             "/users/me/accessibility-settings",
             "/chats",
             "/communities",
@@ -129,6 +130,12 @@ class RoutingContractTest {
 
         given()
                 .when().put("/notifications/" + SAMPLE_UUID + "/read")
+                .then()
+                .statusCode(equalTo(401));
+
+        // A classe consome JSON; o PUT sem corpo sobrescreve com WILDCARD.
+        given()
+                .when().put("/users/me/matches/mutual/" + SAMPLE_UUID + "/seen")
                 .then()
                 .statusCode(equalTo(401));
     }

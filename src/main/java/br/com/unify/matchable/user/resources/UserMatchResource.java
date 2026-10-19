@@ -16,6 +16,7 @@ import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -104,6 +105,41 @@ public class UserMatchResource extends AuthenticatedResource {
             return Response.ok(userMatchService.getMutualMatchesPage(user, page, size)).build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
+        }
+    }
+
+    /** Fila da tela "Deu match": matches mútuos que o usuário ainda não viu. */
+    @GET
+    @Path("/mutual/unseen")
+    @Transactional
+    public Response getUnseenMutualMatches() {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+        return Response.ok(userMatchService.getUnseenMutualMatches(user)).build();
+    }
+
+    /**
+     * A tela "Deu match" deste par foi exibida: não volta mais para a fila.
+     * Sem corpo: {@code @Consumes(WILDCARD)} sobrescreve o JSON da classe para
+     * que um PUT puro não caia em 415.
+     */
+    @PUT
+    @Path("/mutual/{matchId}/seen")
+    @Consumes(MediaType.WILDCARD)
+    @Transactional
+    public Response markMutualMatchSeen(@PathParam("matchId") UUID matchId) {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+
+        try {
+            userMatchService.markMutualMatchSeen(user, matchId);
+            return Response.noContent().build();
+        } catch (NoSuchElementException exception) {
+            return resourceNotFoundResponse(exception.getMessage());
         }
     }
 

@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import io.quarkus.hibernate.orm.panache.PanacheQuery;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
+import io.quarkus.panache.common.Page;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -70,6 +71,21 @@ public class UserPossibleMatch extends PanacheEntityBase {
     )
     public UserProfile declinedByProfile;
 
+    /**
+     * Momento em que o par virou mútuo. Nulo em pares não mútuos e nos mútuos
+     * anteriores à V23 (que nunca entram na fila da tela "Deu match").
+     */
+    @Column(name = "matched_at")
+    public Instant matchedAt;
+
+    /** Quando o starter viu a tela "Deu match" deste par (nulo = ainda não viu). */
+    @Column(name = "starter_match_seen_at")
+    public Instant starterMatchSeenAt;
+
+    /** Quando o pending viu a tela "Deu match" deste par (nulo = ainda não viu). */
+    @Column(name = "pending_match_seen_at")
+    public Instant pendingMatchSeenAt;
+
     public static UserPossibleMatch findByStarterAndPending(UserProfile starterProfile, UserProfile pendingProfile) {
         return find("starterProfile = ?1 and pendingProfile = ?2", starterProfile, pendingProfile).firstResult();
     }
@@ -103,6 +119,27 @@ public class UserPossibleMatch extends PanacheEntityBase {
 
     public static List<UserPossibleMatch> listConfirmedForProfile(UserProfile profile) {
         return findConfirmedForProfile(profile).list();
+    }
+
+    /**
+     * Matches mútuos cuja tela "Deu match" o perfil ainda não viu, do mais
+     * antigo para o mais novo. Mesmo filtro de bloqueio de
+     * {@link #findConfirmedForProfile}: quem bloqueou (ou foi bloqueado) não
+     * comemora o match.
+     */
+    public static List<UserPossibleMatch> listUnseenConfirmedForProfile(UserProfile profile, int limit) {
+        return find(
+                "from UserPossibleMatch m "
+                        + "where m.matchedAt is not null "
+                        + "  and m.starterAccepted = true and m.pendingAccepted = true "
+                        + "  and ((m.starterProfile = ?1 and m.starterMatchSeenAt is null) "
+                        + "    or (m.pendingProfile = ?1 and m.pendingMatchSeenAt is null)) "
+                        + "  and not exists (select 1 from UserBlock b "
+                        + "      where (b.blocker = m.starterProfile.user and b.blocked = m.pendingProfile.user) "
+                        + "         or (b.blocker = m.pendingProfile.user and b.blocked = m.starterProfile.user)) "
+                        + "order by m.matchedAt asc, m.id asc",
+                profile
+        ).page(Page.ofSize(limit)).list();
     }
 
     public static List<UserPossibleMatch> listAllRelatedToProfile(UserProfile profile) {
