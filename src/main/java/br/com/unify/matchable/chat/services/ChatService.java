@@ -27,9 +27,14 @@ public interface ChatService {
      */
     ChatMessagePageResponse getMessages(User user, UUID conversationId, Integer page, Integer size, Instant since);
 
-    ChatMessageResponse sendTextMessage(User user, UUID conversationId, String body);
+    /**
+     * @param replyToMessageId mensagem da mesma conversa que esta responde (citação).
+     *                         Nulo = mensagem solta.
+     */
+    ChatMessageResponse sendTextMessage(User user, UUID conversationId, String body, UUID replyToMessageId);
 
-    ChatMessageResponse sendMediaMessage(User user, UUID conversationId, ChatMediaPayload payload, String caption);
+    ChatMessageResponse sendMediaMessage(
+            User user, UUID conversationId, ChatMediaPayload payload, String caption, UUID replyToMessageId);
 
     /** Bytes + content-type da mídia de uma mensagem, validando participação na conversa. */
     ChatMediaPayload getMessageMedia(User user, UUID messageId);

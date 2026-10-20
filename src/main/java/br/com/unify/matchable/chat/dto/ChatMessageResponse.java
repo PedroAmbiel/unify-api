@@ -12,6 +12,7 @@ import br.com.unify.matchable.chat.enums.ChatMessageType;
  * @param readAt      destinatário abriu a conversa (estado "vista").
  * @param editedAt    texto alterado pelo remetente. Nulo = nunca editada.
  * @param deletedAt   exclusão lógica: body e mídia vêm nulos; o cliente mostra "apagada".
+ * @param replyTo     citação da mensagem respondida. Nulo = mensagem solta.
  */
 public record ChatMessageResponse(
         UUID id,
@@ -29,6 +30,7 @@ public record ChatMessageResponse(
         Instant deliveredAt,
         Instant readAt,
         Instant editedAt,
-        Instant deletedAt
+        Instant deletedAt,
+        ChatMessageReplyResponse replyTo
 ) {
 }

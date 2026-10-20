@@ -101,8 +101,8 @@ class NotificationHooksIntegrationTest {
                 beto.user(), new MatchDecisionRequest(ana.profile().id, true));
         ConversationResponse conversation = chatService.openConversation(ana.user(), mutual.id());
 
-        chatService.sendTextMessage(ana.user(), conversation.conversationId(), "Oi, Beto!");
-        chatService.sendTextMessage(ana.user(), conversation.conversationId(), "Viu meu convite?");
+        chatService.sendTextMessage(ana.user(), conversation.conversationId(), "Oi, Beto!", null);
+        chatService.sendTextMessage(ana.user(), conversation.conversationId(), "Viu meu convite?", null);
 
         List<Notification> forBeto = notificationsOf(beto.user(), NotificationType.NEW_MESSAGE);
         assertEquals(1, forBeto.size());

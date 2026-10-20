@@ -141,7 +141,10 @@ public class ChatResource extends AuthenticatedResource {
         try {
             return Response.status(Response.Status.CREATED)
                     .entity(chatService.sendTextMessage(
-                            user, conversationId, request == null ? null : request.body()))
+                            user,
+                            conversationId,
+                            request == null ? null : request.body(),
+                            request == null ? null : request.replyToMessageId()))
                     .build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
@@ -164,7 +167,8 @@ public class ChatResource extends AuthenticatedResource {
             @RestForm("type") String type,
             @RestForm("file") FileUpload file,
             @RestForm("caption") String caption,
-            @RestForm("durationSeconds") Integer durationSeconds
+            @RestForm("durationSeconds") Integer durationSeconds,
+            @RestForm("replyToMessageId") String replyToMessageId
     ) {
         User user = findCurrentUser();
         if (user == null) {
@@ -181,7 +185,8 @@ public class ChatResource extends AuthenticatedResource {
             );
 
             return Response.status(Response.Status.CREATED)
-                    .entity(chatService.sendMediaMessage(user, conversationId, payload, caption))
+                    .entity(chatService.sendMediaMessage(
+                            user, conversationId, payload, caption, parseUuid(replyToMessageId)))
                     .build();
         } catch (IllegalArgumentException exception) {
             return validationErrorResponse(exception.getMessage());
@@ -312,6 +317,19 @@ public class ChatResource extends AuthenticatedResource {
             throw new IllegalArgumentException(
                     "O parâmetro 'since' deve estar no formato ISO-8601 (ex.: 2025-09-02T14:31:02.104Z)",
                     exception);
+        }
+    }
+
+    protected UUID parseUuid(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+
+        try {
+            return UUID.fromString(value.trim());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(
+                    "O parâmetro 'replyToMessageId' deve ser um UUID válido", exception);
         }
     }
 

@@ -15,6 +15,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import br.com.unify.matchable.chat.dto.ChatMediaPayload;
 import br.com.unify.matchable.chat.dto.ChatMessagePageResponse;
 import br.com.unify.matchable.chat.dto.ChatMessagePreviewResponse;
+import br.com.unify.matchable.chat.dto.ChatMessageReplyResponse;
 import br.com.unify.matchable.chat.dto.ChatMessageResponse;
 import br.com.unify.matchable.chat.dto.ChatReadResponse;
 import br.com.unify.matchable.chat.dto.ConversationListResponse;
@@ -60,6 +61,8 @@ public class ChatServiceImplementation implements ChatService {
     private static final String NOT_THE_SENDER = "Só quem enviou a mensagem pode alterá-la";
     private static final String MESSAGE_DELETED = "Esta mensagem foi apagada";
     private static final String DELETED_PREVIEW = "Mensagem apagada";
+    private static final String REPLY_TARGET_NOT_FOUND = "A mensagem respondida não pertence a esta conversa";
+    private static final String REPLY_TARGET_DELETED = "A mensagem que você está respondendo foi apagada";
     static final String BLOCKED_MESSAGE = "Não é possível enviar mensagens para este usuário";
 
     private static final String INVALID_PAGE_MESSAGE =
@@ -239,7 +242,9 @@ public class ChatServiceImplementation implements ChatService {
     }
 
     @Override
-    public ChatMessageResponse sendTextMessage(User user, UUID conversationId, String body) {
+    public ChatMessageResponse sendTextMessage(
+            User user, UUID conversationId, String body, UUID replyToMessageId) {
+
         UserProfile currentProfile = requireProfile(user);
         Conversation conversation = requireParticipation(conversationId, currentProfile);
         requireNotBlocked(conversation, currentProfile);
@@ -253,8 +258,11 @@ public class ChatServiceImplementation implements ChatService {
                     "A mensagem excede o limite de " + maxMessageLength + " caracteres");
         }
 
+        ChatMessage replyTo = resolveReplyTarget(conversation, replyToMessageId);
+
         ChatMessage message = newMessage(conversation, currentProfile, ChatMessageType.TEXT);
         message.body = normalizedBody;
+        message.replyTo = replyTo;
         message.persist();
 
         conversation.lastMessageAt = message.createdAt;
@@ -265,7 +273,7 @@ public class ChatServiceImplementation implements ChatService {
 
     @Override
     public ChatMessageResponse sendMediaMessage(
-            User user, UUID conversationId, ChatMediaPayload payload, String caption) {
+            User user, UUID conversationId, ChatMediaPayload payload, String caption, UUID replyToMessageId) {
 
         UserProfile currentProfile = requireProfile(user);
         Conversation conversation = requireParticipation(conversationId, currentProfile);
@@ -275,8 +283,11 @@ public class ChatServiceImplementation implements ChatService {
             throw new IllegalArgumentException("Nenhuma mídia foi enviada");
         }
 
+        ChatMessage replyTo = resolveReplyTarget(conversation, replyToMessageId);
+
         ChatMessage message = newMessage(conversation, currentProfile, payload.type());
         message.body = caption == null || caption.isBlank() ? null : caption.trim();
+        message.replyTo = replyTo;
         message.mediaOid = oidImageService.toOidBlob(payload.bytes());
         message.mediaContentType = payload.contentType();
         message.mediaSizeBytes = (long) payload.bytes().length;
@@ -402,6 +413,27 @@ public class ChatServiceImplementation implements ChatService {
             throw new ForbiddenException(NOT_THE_SENDER);
         }
         return message;
+    }
+
+    /**
+     * Mensagem citada por uma resposta: precisa estar na MESMA conversa (não revela
+     * mensagens de outras conversas) e não pode estar apagada (o outro participante
+     * apagou enquanto a resposta era escrita). Ambos 400 e não 409: no app, 409 no
+     * envio significa bloqueio e trava o compositor.
+     */
+    private ChatMessage resolveReplyTarget(Conversation conversation, UUID replyToMessageId) {
+        if (replyToMessageId == null) {
+            return null;
+        }
+
+        ChatMessage target = ChatMessage.findInConversation(conversation, replyToMessageId);
+        if (target == null) {
+            throw new IllegalArgumentException(REPLY_TARGET_NOT_FOUND);
+        }
+        if (target.isDeleted()) {
+            throw new IllegalArgumentException(REPLY_TARGET_DELETED);
+        }
+        return target;
     }
 
     // ================= apoio =================
@@ -530,7 +562,25 @@ public class ChatServiceImplementation implements ChatService {
                 message.deliveredAt,
                 message.readAt,
                 message.editedAt,
-                message.deletedAt
+                message.deletedAt,
+                toReplyResponse(message.replyTo, currentProfile)
+        );
+    }
+
+    private ChatMessageReplyResponse toReplyResponse(ChatMessage original, UserProfile currentProfile) {
+        if (original == null) {
+            return null;
+        }
+
+        return new ChatMessageReplyResponse(
+                original.id,
+                original.sender == null ? null : original.sender.id,
+                buildFullName(original.sender),
+                original.sender != null && Objects.equals(original.sender.id, currentProfile.id),
+                original.type,
+                original.isDeleted() ? null : truncate(original.body, PREVIEW_MAX_LENGTH),
+                original.isDeleted() ? null : original.mediaDurationSeconds,
+                original.isDeleted()
         );
     }
 

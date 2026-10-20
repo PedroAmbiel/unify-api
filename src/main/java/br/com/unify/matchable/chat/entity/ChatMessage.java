@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.UUID;
 
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import org.hibernate.type.SqlTypes;
 
 import br.com.unify.matchable.chat.enums.ChatMessageType;
@@ -35,7 +37,8 @@ import jakarta.persistence.Table;
                 @Index(name = "idx_chat_messages_conversation_updated_at",
                        columnList = "fk_conversation, updated_at"),
                 @Index(name = "idx_chat_messages_sender", columnList = "fk_sender_user_profile"),
-                @Index(name = "idx_chat_messages_read_at", columnList = "read_at")
+                @Index(name = "idx_chat_messages_read_at", columnList = "read_at"),
+                @Index(name = "idx_chat_messages_reply_to_message", columnList = "fk_reply_to_message")
         }
 )
 public class ChatMessage extends PanacheEntityBase {
@@ -116,6 +119,18 @@ public class ChatMessage extends PanacheEntityBase {
      */
     @Column(name = "updated_at", nullable = false)
     public Instant updatedAt;
+
+    /**
+     * Mensagem citada ("responder"), sempre da mesma conversa — garantido no serviço.
+     * Nula = mensagem solta. Exclusão física da original zera a referência.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(
+            name = "fk_reply_to_message",
+            foreignKey = @ForeignKey(name = "fk_chat_messages_reply_to_message")
+    )
+    @OnDelete(action = OnDeleteAction.SET_NULL)
+    public ChatMessage replyTo;
 
     // ---- consultas ------------------------------------------------------
 

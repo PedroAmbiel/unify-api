@@ -766,6 +766,136 @@ class ChatResourceTest {
         sendText(bob, conversationId, "depois do desbloqueio");
     }
 
+    // ---------------------------------------------------------------- responder (citação)
+
+    @Test
+    void replyQuotesTheOriginalAndReflectsItsLaterDeletion() {
+        TestUser alice = createUser("Alice", "Responde");
+        TestUser bob = createUser("Bob", "Responde");
+        String conversationId = openConversation(alice, createMatch(alice, bob, true));
+
+        String originalId = given()
+                .auth().oauth2(bob.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"bora no cinema sábado?\"}")
+        .when()
+                .post(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(201)
+                .body("replyTo", nullValue())
+                .extract().path("id");
+
+        String replyId = given()
+                .auth().oauth2(alice.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"bora!\",\"replyToMessageId\":\"" + originalId + "\"}")
+        .when()
+                .post(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(201)
+                .body("replyTo.id", equalTo(originalId))
+                .body("replyTo.senderUserProfileId", equalTo(bob.profileId().toString()))
+                .body("replyTo.senderName", equalTo("Bob Responde"))
+                .body("replyTo.fromMe", equalTo(false))
+                .body("replyTo.type", equalTo("TEXT"))
+                .body("replyTo.preview", equalTo("bora no cinema sábado?"))
+                .body("replyTo.deleted", equalTo(false))
+                .extract().path("id");
+
+        // Do lado do Bob a citação é dele mesmo.
+        given()
+                .auth().oauth2(bob.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(200)
+                .body("messages.find { it.id == '" + replyId + "' }.replyTo.fromMe", equalTo(true));
+
+        // Original apagada: a citação perde o conteúdo e vira "apagada".
+        given()
+                .auth().oauth2(bob.token())
+        .when()
+                .delete(CHATS_PATH + "/" + conversationId + "/messages/" + originalId)
+        .then()
+                .statusCode(200);
+
+        given()
+                .auth().oauth2(alice.token())
+        .when()
+                .get(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(200)
+                .body("messages.find { it.id == '" + replyId + "' }.body", equalTo("bora!"))
+                .body("messages.find { it.id == '" + replyId + "' }.replyTo.id", equalTo(originalId))
+                .body("messages.find { it.id == '" + replyId + "' }.replyTo.preview", nullValue())
+                .body("messages.find { it.id == '" + replyId + "' }.replyTo.deleted", equalTo(true));
+
+        // Responder a uma mensagem já apagada: 400 (409 no envio é bloqueio para o app).
+        given()
+                .auth().oauth2(alice.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"e aí?\",\"replyToMessageId\":\"" + originalId + "\"}")
+        .when()
+                .post(CHATS_PATH + "/" + conversationId + "/messages")
+        .then()
+                .statusCode(400)
+                .body("error", equalTo("VALIDATION_INVALID_FORMAT"));
+    }
+
+    @Test
+    void replyToMessageOfAnotherConversationIsRejected() {
+        TestUser alice = createUser("Alice", "Cruzada");
+        TestUser bob = createUser("Bob", "Cruzado");
+        TestUser carol = createUser("Carol", "Cruzada");
+        String aliceBob = openConversation(alice, createMatch(alice, bob, true));
+        String aliceCarol = openConversation(alice, createMatch(alice, carol, true));
+
+        String carolMessageId = given()
+                .auth().oauth2(carol.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"segredo\"}")
+        .when()
+                .post(CHATS_PATH + "/" + aliceCarol + "/messages")
+        .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        given()
+                .auth().oauth2(alice.token())
+                .contentType(ContentType.JSON)
+                .body("{\"body\":\"vazou\",\"replyToMessageId\":\"" + carolMessageId + "\"}")
+        .when()
+                .post(CHATS_PATH + "/" + aliceBob + "/messages")
+        .then()
+                .statusCode(400)
+                .body("error", equalTo("VALIDATION_INVALID_FORMAT"));
+
+        given()
+                .auth().oauth2(alice.token())
+                .multiPart("type", "IMAGE")
+                .multiPart("file", "foto.jpg", buildJpeg(64, 64), "image/jpeg")
+                .multiPart("replyToMessageId", "nao-e-uuid")
+        .when()
+                .post(CHATS_PATH + "/" + aliceCarol + "/messages/media")
+        .then()
+                .statusCode(400)
+                .body("error", equalTo("VALIDATION_INVALID_FORMAT"));
+
+        // Mídia respondendo a mensagem válida da mesma conversa.
+        given()
+                .auth().oauth2(alice.token())
+                .multiPart("type", "IMAGE")
+                .multiPart("file", "foto.jpg", buildJpeg(64, 64), "image/jpeg")
+                .multiPart("replyToMessageId", carolMessageId)
+        .when()
+                .post(CHATS_PATH + "/" + aliceCarol + "/messages/media")
+        .then()
+                .statusCode(201)
+                .body("type", equalTo("IMAGE"))
+                .body("replyTo.id", equalTo(carolMessageId))
+                .body("replyTo.preview", equalTo("segredo"));
+    }
+
     // ---- apoio ----------------------------------------------------------
 
     private void sendText(TestUser sender, String conversationId, String body) {
