@@ -1,8 +1,10 @@
 package br.com.unify.matchable.community.entity;
 
 import java.sql.Blob;
+import java.time.Instant;
 import java.util.UUID;
 
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -19,6 +21,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Lob;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 
 @Entity
@@ -58,6 +61,15 @@ public class Community extends PanacheEntityBase {
     @Column(name = "privacy", nullable = false, length = 20)
     public CommunityPrivacy privacy = CommunityPrivacy.PUBLIC;
 
+    /**
+     * Semana 07 (V36): criação da comunidade, base de "comunidades criadas" no
+     * dashboard. As anteriores à V36 herdaram a entrada mais antiga entre os
+     * membros. O default cobre os inserts por SQL dos seeds de %dev/%test.
+     */
+    @ColumnDefault("now()")
+    @Column(name = "created_at", nullable = false, updatable = false)
+    public Instant createdAt;
+
     public static Community findFeedCommunity() {
         Community featuredCommunity = find("active = true and featured = true order by id").firstResult();
         return featuredCommunity != null ? featuredCommunity : find("active = true order by id").firstResult();
@@ -65,5 +77,12 @@ public class Community extends PanacheEntityBase {
 
     public static Community findActiveById(UUID id) {
         return find("id = ?1 and active = true", id).firstResult();
+    }
+
+    @PrePersist
+    void fillCreatedAt() {
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
     }
 }

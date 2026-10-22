@@ -54,6 +54,7 @@ public class NotificationServiceImplementation implements NotificationService {
     static final int BODY_MAX_LENGTH = 500;
     static final int MESSAGE_PREVIEW_MAX_LENGTH = 120;
     static final int COMMENT_PREVIEW_MAX_LENGTH = 100;
+    static final int POST_EXCERPT_MAX_LENGTH = 60;
     static final String FALLBACK_NAME = "Alguém";
 
     static final String AVATAR_URL_PREFIX = "/communities/users/";
@@ -296,6 +297,20 @@ public class NotificationServiceImplementation implements NotificationService {
         return persist(recipient, null, NotificationType.REPORT_UPDATE, reportId, null,
                 "Atualização da sua denúncia",
                 "Sua denúncia foi " + status + ". Obrigado por ajudar a manter a Unify segura.");
+    }
+
+    @Override
+    @Transactional
+    public Notification emitPostRemoved(User author, UUID postId, UUID communityId, String postBody) {
+        if (author == null || postId == null || author.banned) {
+            return null;
+        }
+        String excerpt = postBody == null || postBody.isBlank()
+                ? ""
+                : " \"" + truncate(postBody.trim().replaceAll("\\s+", " "), POST_EXCERPT_MAX_LENGTH) + "\"";
+        return persist(author, null, NotificationType.POST_REMOVED, postId, communityId,
+                "Publicação removida",
+                "Sua publicação" + excerpt + " foi removida pela moderação por não seguir as diretrizes da Unify.");
     }
 
     // ------------------------------------------------------------ apoio

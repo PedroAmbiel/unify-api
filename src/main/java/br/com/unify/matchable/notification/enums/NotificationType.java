@@ -20,6 +20,9 @@ package br.com.unify.matchable.notification.enums;
  *       4.8.6 — avisar todos os membros a cada post é ruído).</li>
  *   <li>{@link #REPORT_UPDATE}: referência = denúncia (emitido pela moderação,
  *       semana 06).</li>
+ *   <li>{@link #POST_REMOVED}: referência = post removido pela moderação
+ *       (semana 07); contexto = comunidade (nulo em post pessoal). O post não
+ *       abre mais: o app só marca o aviso como lido.</li>
  * </ul>
  */
 public enum NotificationType {
@@ -31,5 +34,6 @@ public enum NotificationType {
     POST_LIKED,
     POST_COMMENTED,
     COMMUNITY_POST,
-    REPORT_UPDATE
+    REPORT_UPDATE,
+    POST_REMOVED
 }

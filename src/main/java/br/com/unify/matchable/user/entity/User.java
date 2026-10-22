@@ -20,6 +20,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 
 @Entity
@@ -58,6 +59,15 @@ public class User extends PanacheEntityBase {
     public Instant lastUpdatedAt;
 
     /**
+     * Semana 07 (V34): instante do cadastro, base da métrica "novos usuários"
+     * do dashboard. Contas anteriores à V34 herdaram {@code last_updated_at}.
+     * O default do banco cobre os inserts por SQL dos seeds de %dev/%test.
+     */
+    @ColumnDefault("now()")
+    @Column(name = "created_at", nullable = false, updatable = false)
+    public Instant createdAt;
+
+    /**
      * Semana 06 (V27). Só muda por configuração (AdminBootstrapService) ou SQL
      * direto: nenhum endpoint escreve aqui. O default no banco mantém os seeds
      * e o cadastro funcionando sem informar o papel.
@@ -90,5 +100,12 @@ public class User extends PanacheEntityBase {
 
     public boolean isAdmin() {
         return role == UserRole.ADMIN;
+    }
+
+    @PrePersist
+    void fillCreatedAt() {
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
     }
 }

@@ -378,8 +378,8 @@ public class CommunityServiceImplementation implements CommunityService {
         java.util.Map<UUID, Double> engagementByCommunity = new java.util.HashMap<>();
         for (Community community : matches) {
             long members = CommunityMembership.countByCommunity(community);
-            long posts = Post.count("community", community);
-            long likes = PostLike.count("post.community", community);
+            long posts = Post.count("community = ?1 and active = true", community);
+            long likes = PostLike.count("post.community = ?1 and post.active = true", community);
             engagementByCommunity.put(community.id, members * memberWeight + posts * postWeight + likes * likeWeight);
         }
 
@@ -649,9 +649,10 @@ public class CommunityServiceImplementation implements CommunityService {
             throw new ForbiddenException(POST_DELETE_FORBIDDEN_MESSAGE);
         }
 
-        PostLike.delete("post", post);
-        PostComment.delete("post", post);
-        post.delete();
+        // Soft delete, igual ao post pessoal: toda leitura filtra active = true,
+        // então o post some do app, mas a linha (com curtidas e comentários)
+        // continua para as denúncias e a moderação seguirem apontando para ela.
+        post.active = false;
     }
 
     @Override

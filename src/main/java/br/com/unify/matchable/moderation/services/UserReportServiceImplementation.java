@@ -56,7 +56,8 @@ public class UserReportServiceImplementation implements UserReportService {
         Post reportedPost = null;
         if (request.reportedPostId() != null) {
             reportedPost = Post.findById(request.reportedPostId());
-            if (reportedPost == null) {
+            // Removida pela moderação já foi decidida: não abre fila de novo.
+            if (reportedPost == null || reportedPost.isModerated()) {
                 throw new NoSuchElementException(REPORTED_POST_NOT_FOUND_MESSAGE);
             }
             if (reportedPost.author == null || !reportedPost.author.id.equals(reportedUser.id)) {

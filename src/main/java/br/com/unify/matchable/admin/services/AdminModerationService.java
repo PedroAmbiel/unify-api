@@ -3,6 +3,10 @@ package br.com.unify.matchable.admin.services;
 import java.util.UUID;
 
 import br.com.unify.matchable.admin.dto.AdminBanRequest;
+import br.com.unify.matchable.admin.dto.AdminPostDetailResponse;
+import br.com.unify.matchable.admin.dto.AdminPostKeepRequest;
+import br.com.unify.matchable.admin.dto.AdminPostRemovalRequest;
+import br.com.unify.matchable.admin.dto.AdminPostSummaryResponse;
 import br.com.unify.matchable.admin.dto.AdminReportDetailResponse;
 import br.com.unify.matchable.admin.dto.AdminReportStatusUpdateRequest;
 import br.com.unify.matchable.admin.dto.AdminReportSummaryResponse;
@@ -12,8 +16,9 @@ import br.com.unify.matchable.common.dto.PageResponse;
 import br.com.unify.matchable.user.entity.User;
 
 /**
- * Moderação do backoffice (semana 06): fila de denúncias e banimento.
- * Erros seguem o mapper global (400 / 404 / 409).
+ * Moderação do backoffice: fila de denúncias e banimento (semana 06) e
+ * moderação de publicações denunciadas (semana 07). Erros seguem o mapper
+ * global (400 / 404 / 409).
  */
 public interface AdminModerationService {
 
@@ -46,4 +51,30 @@ public interface AdminModerationService {
     AdminUserDetailResponse banUser(User admin, UUID userId, AdminBanRequest request);
 
     AdminUserDetailResponse unbanUser(User admin, UUID userId);
+
+    // ------------------------------------------------- publicações (semana 07)
+
+    /**
+     * Publicações com ao menos uma denúncia, uma linha por post, denúncia mais
+     * recente primeiro.
+     *
+     * @param filter PENDING (ou vazio: com denúncia pendente e ainda no ar),
+     *               REMOVED (removidas pela moderação) ou ALL.
+     */
+    PageResponse<AdminPostSummaryResponse> listReportedPosts(String filter, Integer page, Integer size);
+
+    AdminPostDetailResponse getPost(UUID postId);
+
+    /** Imagem da publicação (mesmo removida ou apagada pelo autor). */
+    byte[] getPostMedia(UUID postId);
+
+    /**
+     * Remoção DEFINITIVA: o post some para todos (inclusive o autor) e não há
+     * como desfazer. Encerra como RESOLVED as denúncias pendentes contra ele,
+     * avisa cada denunciante uma vez e avisa o autor.
+     */
+    AdminPostDetailResponse removePost(User admin, UUID postId, AdminPostRemovalRequest request);
+
+    /** Mantém o post no ar e descarta (DISMISSED) todas as denúncias pendentes contra ele. */
+    AdminPostDetailResponse keepPost(User admin, UUID postId, AdminPostKeepRequest request);
 }

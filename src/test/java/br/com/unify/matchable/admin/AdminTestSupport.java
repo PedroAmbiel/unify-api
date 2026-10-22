@@ -9,9 +9,15 @@ import java.util.UUID;
 import br.com.unify.matchable.auth.dto.SignInRequest;
 import br.com.unify.matchable.auth.dto.TokenResponse;
 import br.com.unify.matchable.common.UUIDv7Generator;
+import br.com.unify.matchable.community.entity.Community;
+import br.com.unify.matchable.community.entity.CommunityMembership;
+import br.com.unify.matchable.community.enums.CommunityMemberRole;
+import br.com.unify.matchable.community.enums.CommunityPrivacy;
 import br.com.unify.matchable.moderation.entity.UserReport;
 import br.com.unify.matchable.moderation.enums.ReportReason;
 import br.com.unify.matchable.moderation.enums.UserReportStatus;
+import br.com.unify.matchable.post.entity.Post;
+import br.com.unify.matchable.post.enums.PostOrigin;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserProfile;
 import br.com.unify.matchable.user.enums.UserRole;
@@ -85,6 +91,89 @@ public final class AdminTestSupport {
         .then()
                 .statusCode(200)
                 .extract().as(TokenResponse.class);
+    }
+
+    /**
+     * Posts e comunidades criados pelos testes do backoffice ficam commitados e
+     * apareceriam no feed/descoberta de outras classes de teste (que contam o
+     * que é visível). Chamar no {@code @AfterEach} de quem cria conteúdo.
+     */
+    public static void retireContent() {
+        QuarkusTransaction.requiringNew().run(() -> {
+            var entityManager = Post.getEntityManager();
+            entityManager.createNativeQuery("update posts set active = false where active = true "
+                    + "and fk_user in (select id from users where email like 'admin-test-%')").executeUpdate();
+            entityManager.createNativeQuery("update communities set active = false where active = true "
+                    + "and fk_owner_user in (select id from users where email like 'admin-test-%')").executeUpdate();
+        });
+    }
+
+    /** Publicação pessoal ativa (semana 07: moderação de publicações). */
+    public static UUID personalPost(TestAccount author, String body) {
+        UUID postId = UUIDv7Generator.generate();
+        QuarkusTransaction.requiringNew().run(() -> {
+            Post post = new Post();
+            post.id = postId;
+            post.origin = PostOrigin.PERSONAL;
+            post.author = User.findById(author.userId());
+            post.body = body;
+            post.createdAt = Instant.now();
+            post.persist();
+        });
+        return postId;
+    }
+
+    /** Comunidade pública nova, com o autor como membro, e um post dele nela. */
+    public static UUID communityPost(TestAccount author, String body) {
+        UUID postId = UUIDv7Generator.generate();
+        QuarkusTransaction.requiringNew().run(() -> {
+            User user = User.findById(author.userId());
+
+            Community community = new Community();
+            community.id = UUIDv7Generator.generate();
+            community.name = "Comunidade " + UUID.randomUUID();
+            community.owner = user;
+            community.active = true;
+            community.privacy = CommunityPrivacy.PUBLIC;
+            community.persist();
+
+            CommunityMembership membership = new CommunityMembership();
+            membership.id = UUIDv7Generator.generate();
+            membership.community = community;
+            membership.userProfile = UserProfile.findById(author.profileId());
+            membership.role = CommunityMemberRole.ADMIN;
+            membership.joinedAt = Instant.now();
+            membership.persist();
+
+            Post post = new Post();
+            post.id = postId;
+            post.origin = PostOrigin.COMMUNITY;
+            post.community = community;
+            post.author = user;
+            post.body = body;
+            post.createdAt = Instant.now();
+            post.persist();
+        });
+        return postId;
+    }
+
+    /** Denúncia ABERTA de publicação (o denunciado é o autor do post). */
+    public static UUID reportPost(TestAccount reporter, UUID postId, ReportReason reason) {
+        UUID reportId = UUIDv7Generator.generate();
+        QuarkusTransaction.requiringNew().run(() -> {
+            Post post = Post.findById(postId);
+            UserReport report = new UserReport();
+            report.id = reportId;
+            report.reporter = User.findById(reporter.userId());
+            report.reportedUser = post.author;
+            report.reportedPost = post;
+            report.reason = reason;
+            report.description = "Denúncia de publicação criada pelo teste";
+            report.status = UserReportStatus.OPEN;
+            report.createdAt = Instant.now();
+            report.persist();
+        });
+        return reportId;
     }
 
     public static UUID report(TestAccount reporter, TestAccount reported, ReportReason reason) {

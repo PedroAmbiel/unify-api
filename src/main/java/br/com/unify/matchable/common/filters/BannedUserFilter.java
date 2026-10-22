@@ -7,6 +7,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
 
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
+import br.com.unify.matchable.user.services.UserActivityTracker;
 import jakarta.annotation.Priority;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
@@ -26,6 +27,9 @@ import jakarta.ws.rs.ext.Provider;
  * Roda depois da autenticação, em toda requisição com JWT válido: uma consulta
  * por projeção (não carrega a entidade nem o perfil) que só devolve linha para
  * conta banida. Se pesar, trocar por cache curto invalidado no ban.
+ *
+ * Semana 07: é também o ponto único que marca o dia de uso da pessoa para os
+ * indicadores de atividade do dashboard (no máximo uma escrita por dia).
  */
 @Provider
 @Priority(Priorities.AUTHORIZATION + 10)
@@ -33,6 +37,9 @@ public class BannedUserFilter implements ContainerRequestFilter {
 
     @Inject
     EntityManager entityManager;
+
+    @Inject
+    UserActivityTracker activityTracker;
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
@@ -56,7 +63,10 @@ public class BannedUserFilter implements ContainerRequestFilter {
                     .entity(ErrorResponse.of(ErrorCode.USER_DISABLED, banReasons.get(0)))
                     .type(MediaType.APPLICATION_JSON)
                     .build());
+            return;
         }
+
+        activityTracker.recordActivity(userId);
     }
 
     private static UUID parseSubject(String subject) {

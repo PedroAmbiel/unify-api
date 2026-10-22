@@ -62,6 +62,13 @@ public interface NotificationService {
     Notification emitReportUpdate(User recipient, UUID reportId, String statusLabel);
 
     /**
+     * Para a moderação (semana 07): avisa o AUTOR que a publicação foi removida.
+     * O texto cita o começo do post para a pessoa saber qual foi; o motivo
+     * registrado pelo moderador é interno e não vai no aviso.
+     */
+    Notification emitPostRemoved(User author, UUID postId, UUID communityId, String postBody);
+
+    /**
      * Marca como lidos os avisos de um destino que perderam o sentido: abrir a
      * conversa ({@code NEW_MESSAGE} + conversa), responder um pedido para
      * seguir ({@code FOLLOW_REQUEST} + perfil de quem pediu).

@@ -12,6 +12,8 @@ import java.util.UUID;
 import org.hibernate.annotations.Check;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import org.hibernate.type.SqlTypes;
 
 import br.com.unify.matchable.post.enums.PostOrigin;
@@ -37,11 +39,18 @@ import jakarta.persistence.Table;
  * pessoais têm {@code origin = PERSONAL} e {@code community} nulo. As consultas
  * de comunidade filtram por {@code community}, então nunca enxergam posts
  * pessoais; as consultas do feed pessoal filtram por {@code origin}.
- * {@code active = false} é o soft delete dos posts pessoais (V13).
+ * {@code active = false} é o soft delete de todo post apagado no app — pessoal
+ * (V13) ou de comunidade (desde a semana 07; antes a linha era apagada) — e
+ * também o efeito da remoção pela moderação (V35, {@code moderatedAt}
+ * preenchido). Toda consulta de leitura filtra {@code active = true}, então o
+ * post some para todos, inclusive para o autor, e não há caminho de volta; a
+ * linha fica para as denúncias continuarem apontando para ela.
  */
 @Entity
 @Table(name = "posts")
 @Check(constraints = "(origin = 'COMMUNITY' and fk_community is not null) or (origin = 'PERSONAL' and fk_community is null)")
+// Espelha ck_posts_moderation_inactive (V35): removido pela moderação nunca volta a ficar ativo.
+@Check(name = "ck_posts_moderation_inactive", constraints = "moderated_at is null or active = false")
 public class Post extends PanacheEntityBase {
 
     @Id
@@ -82,6 +91,23 @@ public class Post extends PanacheEntityBase {
     /** Instante da última edição do texto (V14); nulo = nunca editada. */
     @Column(name = "edited_at")
     public Instant editedAt;
+
+    /** Semana 07 (V35): remoção definitiva pelo backoffice; nulo = não moderada. */
+    @Column(name = "moderated_at")
+    public Instant moderatedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @OnDelete(action = OnDeleteAction.SET_NULL)
+    @JoinColumn(name = "fk_moderated_by", foreignKey = @ForeignKey(name = "fk_posts_moderated_by"))
+    public User moderatedBy;
+
+    /** Motivo registrado pelo moderador (interno: não vai para o autor). */
+    @Column(name = "moderation_reason", length = 500)
+    public String moderationReason;
+
+    public boolean isModerated() {
+        return moderatedAt != null;
+    }
 
     /**
      * Posts ativos pelos ids, na MESMA ordem da lista recebida (o ranking do

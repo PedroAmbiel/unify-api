@@ -29,11 +29,14 @@ public class AdminAuditService {
     public static final String ACTION_LOOKUP_TOGGLE_ACTIVE = "LOOKUP_TOGGLE_ACTIVE";
     public static final String ACTION_LOOKUP_DELETE = "LOOKUP_DELETE";
     public static final String ACTION_SCORING_WEIGHTS_UPDATE = "SCORING_WEIGHTS_UPDATE";
+    public static final String ACTION_POST_REMOVE = "POST_REMOVE";
+    public static final String ACTION_POST_KEEP = "POST_KEEP";
 
     public static final String TARGET_USER = "USER";
     public static final String TARGET_REPORT = "REPORT";
     public static final String TARGET_LOOKUP = "LOOKUP";
     public static final String TARGET_SCORING_WEIGHTS = "SCORING_WEIGHTS";
+    public static final String TARGET_POST = "POST";
 
     private static final int MAX_DETAILS_LENGTH = 1000;
     private static final int MAX_IP_LENGTH = 64;

@@ -2,14 +2,20 @@ package br.com.unify.matchable.admin.services;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.UUID;
 
 import br.com.unify.matchable.admin.dto.AdminBanRequest;
+import br.com.unify.matchable.admin.dto.AdminPostDetailResponse;
+import br.com.unify.matchable.admin.dto.AdminPostKeepRequest;
+import br.com.unify.matchable.admin.dto.AdminPostRemovalRequest;
+import br.com.unify.matchable.admin.dto.AdminPostSummaryResponse;
 import br.com.unify.matchable.admin.dto.AdminReportDetailResponse;
 import br.com.unify.matchable.admin.dto.AdminReportStatusUpdateRequest;
 import br.com.unify.matchable.admin.dto.AdminReportSummaryResponse;
@@ -33,6 +39,8 @@ import io.quarkus.panache.common.Page;
 import io.quarkus.panache.common.Parameters;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.TypedQuery;
 import jakarta.transaction.Transactional;
 
 @ApplicationScoped
@@ -66,6 +74,22 @@ public class AdminModerationServiceImplementation implements AdminModerationServ
     /** Nota gravada nas denúncias encerradas pelo banimento em cascata. */
     static final String BAN_CASCADE_NOTE_PREFIX = "Encerrada pelo banimento da conta denunciada. Motivo: ";
 
+    static final int MIN_REMOVAL_REASON_LENGTH = 10;
+    static final int MAX_REMOVAL_REASON_LENGTH = 500;
+
+    static final String POST_NOT_FOUND_MESSAGE = "Publicação não encontrada";
+    static final String POST_WITHOUT_IMAGE_MESSAGE = "A publicação não tem imagem";
+    static final String POST_ALREADY_REMOVED_MESSAGE = "Esta publicação já foi removida pela moderação";
+    static final String POST_WITHOUT_PENDING_REPORTS_MESSAGE = "Esta publicação não tem denúncias pendentes";
+    static final String REMOVAL_REASON_TOO_SHORT_MESSAGE =
+            "Informe o motivo da remoção com ao menos " + MIN_REMOVAL_REASON_LENGTH + " caracteres";
+    static final String REMOVAL_REASON_TOO_LONG_MESSAGE =
+            "O motivo da remoção deve ter no máximo " + MAX_REMOVAL_REASON_LENGTH + " caracteres";
+
+    /** Notas gravadas nas denúncias encerradas pela decisão sobre a publicação. */
+    static final String POST_REMOVED_NOTE_PREFIX = "Publicação removida pela moderação. Motivo: ";
+    static final String POST_KEPT_NOTE_PREFIX = "Publicação mantida pela moderação. ";
+
     @Inject
     AdminAuditService auditService;
 
@@ -74,6 +98,9 @@ public class AdminModerationServiceImplementation implements AdminModerationServ
 
     @Inject
     OidImageService oidImageService;
+
+    @Inject
+    EntityManager entityManager;
 
     // ---------------------------------------------------------------- denúncias
 
@@ -282,17 +309,7 @@ public class AdminModerationServiceImplementation implements AdminModerationServ
         // 4) encerra as denúncias pendentes contra a conta e avisa cada denunciante UMA vez
         List<UserReport> pendingReports = UserReport.list(
                 "reportedUser = ?1 and status in ?2", target, UserReportStatus.PENDING);
-        Set<UUID> notifiedReporters = new HashSet<>();
-        for (UserReport report : pendingReports) {
-            report.status = UserReportStatus.RESOLVED;
-            report.adminNote = truncate(BAN_CASCADE_NOTE_PREFIX + reason, MAX_ADMIN_NOTE_LENGTH);
-            report.reviewedAt = now;
-            report.reviewedBy = admin;
-            report.resolvedAt = now;
-            if (report.reporter != null && notifiedReporters.add(report.reporter.id)) {
-                notifyReporter(report);
-            }
-        }
+        closeReports(pendingReports, UserReportStatus.RESOLVED, BAN_CASCADE_NOTE_PREFIX + reason, admin, now);
 
         auditService.record(admin, AdminAuditService.ACTION_BAN_USER, AdminAuditService.TARGET_USER,
                 userId.toString(), "motivo: " + reason + " | denúncias encerradas: " + pendingReports.size());
@@ -318,6 +335,184 @@ public class AdminModerationServiceImplementation implements AdminModerationServ
         return toUserDetail(target);
     }
 
+
+    // -------------------------------------------------------------- publicações
+
+    @Override
+    @Transactional
+    public PageResponse<AdminPostSummaryResponse> listReportedPosts(String filter, Integer page, Integer size) {
+        int resolvedPage = PageParams.resolvePage(page);
+        int resolvedSize = PageParams.resolveSize(size);
+        String resolvedFilter = parsePostFilter(filter);
+
+        // PENDING: no ar e com denúncia pendente; REMOVED: removida pela moderação.
+        String postCondition = switch (resolvedFilter) {
+            case "PENDING" -> "p.moderatedAt is null";
+            case "REMOVED" -> "p.moderatedAt is not null";
+            default -> "1 = 1";
+        };
+        boolean onlyPending = "PENDING".equals(resolvedFilter);
+
+        TypedQuery<Long> countQuery = entityManager.createQuery(
+                "select count(p) from Post p where " + postCondition
+                        + " and exists (select 1 from UserReport r where r.reportedPost = p"
+                        + (onlyPending ? " and r.status in :pending" : "") + ")",
+                Long.class);
+        if (onlyPending) {
+            countQuery.setParameter("pending", UserReportStatus.PENDING);
+        }
+        long total = countQuery.getSingleResult();
+
+        // Uma linha por post com as contagens; só os ids da página são hidratados depois.
+        TypedQuery<Object[]> pageQuery = entityManager.createQuery(
+                "select p.id, count(r), "
+                        + "sum(case when r.status in :pending then 1 else 0 end), max(r.createdAt) "
+                        + "from UserReport r join r.reportedPost p where " + postCondition + " "
+                        + "group by p.id "
+                        + (onlyPending ? "having sum(case when r.status in :pending then 1 else 0 end) > 0 " : "")
+                        + "order by max(r.createdAt) desc, p.id desc",
+                Object[].class);
+        pageQuery.setParameter("pending", UserReportStatus.PENDING);
+        List<Object[]> rows = pageQuery
+                .setFirstResult(resolvedPage * resolvedSize)
+                .setMaxResults(resolvedSize)
+                .getResultList();
+
+        List<UUID> ids = rows.stream().map(row -> (UUID) row[0]).toList();
+        Map<UUID, Post> postsById = new HashMap<>();
+        if (!ids.isEmpty()) {
+            Post.<Post>list("id in ?1", ids).forEach(post -> postsById.put(post.id, post));
+        }
+
+        List<AdminPostSummaryResponse> content = new ArrayList<>(rows.size());
+        for (Object[] row : rows) {
+            Post post = postsById.get((UUID) row[0]);
+            if (post == null) {
+                continue;
+            }
+            content.add(new AdminPostSummaryResponse(
+                    toReportedPost(post),
+                    AdminUserSummaryResponse.from(post.author),
+                    ((Number) row[1]).longValue(),
+                    row[2] == null ? 0L : ((Number) row[2]).longValue(),
+                    (Instant) row[3]));
+        }
+        return PageResponse.of(content, resolvedPage, resolvedSize, total);
+    }
+
+    @Override
+    @Transactional
+    public AdminPostDetailResponse getPost(UUID postId) {
+        return toPostDetail(requirePost(postId));
+    }
+
+    @Override
+    @Transactional
+    public byte[] getPostMedia(UUID postId) {
+        Post post = requirePost(postId);
+        if (post.mediaOid == null) {
+            throw new NoSuchElementException(POST_WITHOUT_IMAGE_MESSAGE);
+        }
+        return oidImageService.readOidBlob(post.mediaOid);
+    }
+
+    @Override
+    @Transactional
+    public AdminPostDetailResponse removePost(User admin, UUID postId, AdminPostRemovalRequest request) {
+        Post post = requirePost(postId);
+        if (post.isModerated()) {
+            throw new IllegalStateException(POST_ALREADY_REMOVED_MESSAGE);
+        }
+
+        String reason = trimToNull(request == null ? null : request.reason());
+        if (reason == null || reason.length() < MIN_REMOVAL_REASON_LENGTH) {
+            throw new IllegalArgumentException(REMOVAL_REASON_TOO_SHORT_MESSAGE);
+        }
+        if (reason.length() > MAX_REMOVAL_REASON_LENGTH) {
+            throw new IllegalArgumentException(REMOVAL_REASON_TOO_LONG_MESSAGE);
+        }
+
+        Instant now = Instant.now();
+        boolean wasVisible = post.active;
+
+        // 1) some para todos: toda leitura do app filtra active = true. Os campos de
+        //    moderação impedem a volta (ck_posts_moderation_inactive) e ficam como evidência.
+        post.active = false;
+        post.moderatedAt = now;
+        post.moderatedBy = admin;
+        post.moderationReason = reason;
+
+        // 2) encerra as denúncias pendentes do post, um aviso por denunciante
+        List<UserReport> pendingReports = UserReport.list(
+                "reportedPost = ?1 and status in ?2", post, UserReportStatus.PENDING);
+        closeReports(pendingReports, UserReportStatus.RESOLVED, POST_REMOVED_NOTE_PREFIX + reason, admin, now);
+
+        // 3) o autor fica sabendo (post já apagado por ele não precisa de aviso)
+        if (wasVisible) {
+            notificationService.emitPostRemoved(
+                    post.author, post.id, post.community == null ? null : post.community.id, post.body);
+        }
+
+        auditService.record(admin, AdminAuditService.ACTION_POST_REMOVE, AdminAuditService.TARGET_POST,
+                postId.toString(), "motivo: " + reason + " | denúncias encerradas: " + pendingReports.size());
+        return toPostDetail(post);
+    }
+
+    @Override
+    @Transactional
+    public AdminPostDetailResponse keepPost(User admin, UUID postId, AdminPostKeepRequest request) {
+        Post post = requirePost(postId);
+        if (post.isModerated()) {
+            throw new IllegalStateException(POST_ALREADY_REMOVED_MESSAGE);
+        }
+
+        String note = trimToNull(request == null ? null : request.adminNote());
+        if (note == null || note.length() < MIN_ADMIN_NOTE_LENGTH) {
+            throw new IllegalArgumentException(ADMIN_NOTE_REQUIRED_MESSAGE);
+        }
+        if (note.length() > MAX_ADMIN_NOTE_LENGTH) {
+            throw new IllegalArgumentException(ADMIN_NOTE_TOO_LONG_MESSAGE);
+        }
+
+        List<UserReport> pendingReports = UserReport.list(
+                "reportedPost = ?1 and status in ?2", post, UserReportStatus.PENDING);
+        if (pendingReports.isEmpty()) {
+            throw new IllegalStateException(POST_WITHOUT_PENDING_REPORTS_MESSAGE);
+        }
+        closeReports(pendingReports, UserReportStatus.DISMISSED, POST_KEPT_NOTE_PREFIX + note, admin, Instant.now());
+
+        auditService.record(admin, AdminAuditService.ACTION_POST_KEEP, AdminAuditService.TARGET_POST,
+                postId.toString(), "nota: " + note + " | denúncias descartadas: " + pendingReports.size());
+        return toPostDetail(post);
+    }
+
+    /**
+     * Encerra as denúncias de uma vez (ban, remoção ou manutenção do post) e
+     * avisa cada denunciante UMA vez, mesmo que ele tenha várias na lista.
+     */
+    private void closeReports(List<UserReport> reports, UserReportStatus status, String note, User admin, Instant now) {
+        String storedNote = truncate(note, MAX_ADMIN_NOTE_LENGTH);
+        Set<UUID> notifiedReporters = new HashSet<>();
+        for (UserReport report : reports) {
+            report.status = status;
+            report.adminNote = storedNote;
+            report.reviewedAt = now;
+            report.reviewedBy = admin;
+            report.resolvedAt = now;
+            if (report.reporter != null && notifiedReporters.add(report.reporter.id)) {
+                notifyReporter(report);
+            }
+        }
+    }
+
+    private AdminPostDetailResponse toPostDetail(Post post) {
+        List<AdminReportSummaryResponse> reports = UserReport.<UserReport>list(
+                        "reportedPost = ?1 order by createdAt desc, id desc", post).stream()
+                .map(this::toReportSummary)
+                .toList();
+        return new AdminPostDetailResponse(toReportedPost(post), toUserDetail(post.author), reports);
+    }
+
     // -------------------------------------------------------------------- apoio
 
     private static UserReport requireReport(UUID reportId) {
@@ -326,6 +521,14 @@ public class AdminModerationServiceImplementation implements AdminModerationServ
             throw new NoSuchElementException(REPORT_NOT_FOUND_MESSAGE);
         }
         return report;
+    }
+
+    private static Post requirePost(UUID postId) {
+        Post post = postId == null ? null : Post.findById(postId);
+        if (post == null) {
+            throw new NoSuchElementException(POST_NOT_FOUND_MESSAGE);
+        }
+        return post;
     }
 
     private static User requireUser(UUID userId) {
@@ -355,6 +558,19 @@ public class AdminModerationServiceImplementation implements AdminModerationServ
             throw new IllegalArgumentException(
                     "Status inválido: " + value + ". Use OPEN, UNDER_REVIEW, RESOLVED ou DISMISSED");
         }
+    }
+
+    static String parsePostFilter(String value) {
+        String normalized = trimToNull(value);
+        if (normalized == null) {
+            return "PENDING";
+        }
+        String upper = normalized.toUpperCase(Locale.ROOT);
+        return switch (upper) {
+            case "PENDING", "REMOVED", "ALL" -> upper;
+            default -> throw new IllegalArgumentException(
+                    "Filtro inválido: " + value + ". Use PENDING, REMOVED ou ALL");
+        };
     }
 
     static String parseUserFilter(String value) {
@@ -417,7 +633,11 @@ public class AdminModerationServiceImplementation implements AdminModerationServ
                 post.active,
                 post.community == null ? null : post.community.id,
                 post.community == null ? null : post.community.name,
-                post.createdAt);
+                post.createdAt,
+                post.editedAt,
+                post.moderatedAt,
+                post.moderatedBy == null ? null : fullName(post.moderatedBy),
+                post.moderationReason);
     }
 
     AdminUserDetailResponse toUserDetail(User user) {

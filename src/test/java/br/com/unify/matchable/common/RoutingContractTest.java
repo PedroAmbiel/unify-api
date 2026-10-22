@@ -64,7 +64,18 @@ class RoutingContractTest {
             "/admin/users",
             "/admin/users/" + SAMPLE_UUID,
             "/admin/scoring-weights",
-            "/admin/scoring-weights/feed"
+            "/admin/scoring-weights/feed",
+            // semana 07 — dashboard e moderação de publicações
+            "/admin/dashboard/summary",
+            "/admin/dashboard/timeseries?metric=new_users",
+            "/admin/dashboard/top-communities",
+            "/admin/dashboard/growth",
+            "/admin/dashboard/matches",
+            "/admin/dashboard/posts",
+            "/admin/dashboard/communities",
+            "/admin/posts/reported",
+            "/admin/posts/" + SAMPLE_UUID,
+            "/admin/posts/" + SAMPLE_UUID + "/media"
     })
     void protectedGetRouteRespondsUnauthorizedNotNotFound(String path) {
         given()
@@ -113,6 +124,21 @@ class RoutingContractTest {
                 .contentType(ContentType.JSON)
                 .body("{}")
                 .when().post("/notifications/push-tokens")
+                .then()
+                .statusCode(equalTo(401));
+
+        // Semana 07: decisões sobre publicações denunciadas (consomem JSON).
+        given()
+                .contentType(ContentType.JSON)
+                .body("{}")
+                .when().post("/admin/posts/" + SAMPLE_UUID + "/remove")
+                .then()
+                .statusCode(equalTo(401));
+
+        given()
+                .contentType(ContentType.JSON)
+                .body("{}")
+                .when().post("/admin/posts/" + SAMPLE_UUID + "/keep")
                 .then()
                 .statusCode(equalTo(401));
     }

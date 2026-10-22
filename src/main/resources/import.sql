@@ -240,3 +240,41 @@ insert into scoring_weights (dimension, weight) values
     ('COMMUNITY_DISCOVERY_POST', 2),
     ('COMMUNITY_DISCOVERY_LIKE', 1)
 on conflict (dimension) do nothing;
+
+
+-- ---------------------------------------------------------------------------
+-- Semana 07 (espelha V34/V35). O Hibernate cria users.created_at (default
+-- now()), as colunas de moderação de posts e o check
+-- ck_posts_moderation_inactive a partir das entidades; aqui ficam os índices.
+-- ---------------------------------------------------------------------------
+
+create index if not exists idx_users_created_at
+    on users (created_at);
+
+create index if not exists idx_user_possible_matches_matched_at
+    on user_possible_matches (matched_at)
+    where matched_at is not null;
+
+create index if not exists idx_chat_messages_created_at
+    on chat_messages (created_at);
+
+create index if not exists idx_posts_created_at
+    on posts (created_at);
+
+create index if not exists idx_user_reports_created_at
+    on user_reports (created_at);
+
+create index if not exists idx_posts_moderated_at
+    on posts (moderated_at desc)
+    where moderated_at is not null;
+
+-- Semana 07 (ajuste, espelha V36): user_activity_days e communities.created_at
+-- saem das entidades; aqui só os índices.
+create index if not exists idx_user_activity_days_date
+    on user_activity_days (activity_date);
+
+create index if not exists idx_communities_created_at
+    on communities (created_at);
+
+create index if not exists idx_community_memberships_joined_at
+    on community_memberships (joined_at);
