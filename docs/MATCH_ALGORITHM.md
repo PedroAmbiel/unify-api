@@ -4,7 +4,11 @@
 > O briefing original permanece em `MATCH_ALG_GUIDE.md` como referência histórica.
 >
 > - Implementação: `src/main/java/br/com/unify/matchable/user/services/UserMatchServiceImplementation.java`
-> - Pesos e constantes: `src/main/java/br/com/unify/matchable/user/services/MatchScoringPolicy.java`
+> - Pesos: administráveis pelo backoffice desde 2026-10-20 (`/pesos/match`). Padrões em
+>   `src/main/java/br/com/unify/matchable/scoring/enums/ScoringDimension.java` (`MATCH_*`), valor
+>   vigente em memória (`ScoringWeightRegistry`, carregado do banco no boot — tabela `scoring_weights`, V33).
+>   A tabela 3.1 abaixo lista os PADRÕES; a validação do backoffice mantém as fatias somando 100.
+> - Demais constantes (curvas, frações, faixas): `src/main/java/br/com/unify/matchable/user/services/MatchScoringPolicy.java`
 > - Limpeza de recusas: `src/main/java/br/com/unify/matchable/user/services/UserMatchCleanupService.java`
 > - Entidade de decisão: `src/main/java/br/com/unify/matchable/user/entity/UserPossibleMatch.java`
 > - Testes: `src/test/java/.../user/services/UserMatchServiceImplementationTest.java`,

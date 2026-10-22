@@ -24,6 +24,7 @@ import br.com.unify.matchable.post.entity.Post;
 import br.com.unify.matchable.post.entity.PostComment;
 import br.com.unify.matchable.post.entity.PostLike;
 import br.com.unify.matchable.post.enums.PostOrigin;
+import br.com.unify.matchable.scoring.services.ScoringWeightRegistry;
 import br.com.unify.matchable.social.dto.FollowActionResponse;
 import br.com.unify.matchable.social.dto.FollowPageResponse;
 import br.com.unify.matchable.social.dto.FollowRequestPageResponse;
@@ -103,6 +104,9 @@ public class SocialServiceImplementation implements SocialService {
 
     @Inject
     NotificationService notificationService;
+
+    @Inject
+    ScoringWeightRegistry scoringWeightRegistry;
 
     // ------------------------------------------------------------- follow
 
@@ -423,8 +427,8 @@ public class SocialServiceImplementation implements SocialService {
 
         // size + 1 para saber hasNext sem COUNT (padrão de feed infinito).
         int offset = resolvedPage * resolvedSize;
-        List<HomeFeedRankingPolicy.RankedPost> ranked =
-                HomeFeedRankingPolicy.rank(Post.getEntityManager(), context, offset, resolvedSize + 1);
+        List<HomeFeedRankingPolicy.RankedPost> ranked = HomeFeedRankingPolicy.rank(
+                Post.getEntityManager(), context, scoringWeightRegistry.current(), offset, resolvedSize + 1);
         boolean hasNext = ranked.size() > resolvedSize;
         List<HomeFeedRankingPolicy.RankedPost> pageRows = ranked.stream().limit(resolvedSize).toList();
 
@@ -865,7 +869,8 @@ public class SocialServiceImplementation implements SocialService {
             throw new IllegalArgumentException(TARGET_PROFILE_REQUIRED_MESSAGE);
         }
         UserProfile profile = UserProfile.findById(userProfileId);
-        if (profile == null) {
+        // Semana 06: conta suspensa responde como perfil inexistente (seguir, stats, posts).
+        if (profile == null || (profile.user != null && profile.user.banned)) {
             throw new NoSuchElementException(TARGET_PROFILE_NOT_FOUND_MESSAGE);
         }
         return profile;

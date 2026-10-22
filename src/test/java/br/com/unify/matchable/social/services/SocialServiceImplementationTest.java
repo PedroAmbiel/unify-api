@@ -11,7 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -27,6 +29,9 @@ import br.com.unify.matchable.post.entity.Post;
 import br.com.unify.matchable.post.entity.PostComment;
 import br.com.unify.matchable.post.entity.PostLike;
 import br.com.unify.matchable.post.enums.PostOrigin;
+import br.com.unify.matchable.scoring.ScoringWeightTestSupport;
+import br.com.unify.matchable.scoring.enums.ScoringDimension;
+import br.com.unify.matchable.scoring.services.ScoringWeightRegistry;
 import br.com.unify.matchable.social.dto.FollowActionResponse;
 import br.com.unify.matchable.social.dto.FollowPageResponse;
 import br.com.unify.matchable.social.dto.FollowStatsResponse;
@@ -53,6 +58,9 @@ class SocialServiceImplementationTest {
 
     @Inject
     SocialService service;
+
+    @Inject
+    ScoringWeightRegistry scoringWeightRegistry;
 
     // ------------------------------------------------------------- follow
 
@@ -325,6 +333,41 @@ class SocialServiceImplementationTest {
         UserFeedPageResponse byEngagement = service.getFeed(ana.user, 0, 10);
         assertEquals(List.of(betoPost.id(), daniPost.id(), caioPost.id()),
                 byEngagement.posts().stream().map(UserPostResponse::id).toList());
+    }
+
+    @Test
+    @TestTransaction
+    void getFeed_usaOsPesosVigentesDoBackoffice() {
+        Fixture ana = withInterests(fixture("Ana"), 1, 2);
+        Fixture beto = fixture("Beto");
+        Fixture caio = withInterests(fixture("Caio"), 1, 2);
+        service.follow(ana.user, beto.profile.id);
+
+        UserPostResponse followedPost = service.createPost(beto.user, "de quem eu sigo", null);
+        UserPostResponse affinityPost = service.createPost(caio.user, "dois interesses em comum", null);
+        Set<UUID> mine = Set.of(followedPost.id(), affinityPost.id());
+
+        // Padrão: seguir (60) vale mais que 2 interesses em comum (2 x 15).
+        assertEquals(List.of(followedPost.id(), affinityPost.id()), feedIds(ana, mine));
+
+        try {
+            ScoringWeightTestSupport.override(scoringWeightRegistry, Map.of(
+                    ScoringDimension.FEED_FOLLOWING, 0d,
+                    ScoringDimension.FEED_SHARED_INTEREST, 50d,
+                    ScoringDimension.FEED_SHARED_INTERESTS_CAP, 200d));
+
+            // Mesmos posts, pesos novos: a afinidade (2 x 50) passa quem eu sigo (0), sem reiniciar nada.
+            assertEquals(List.of(affinityPost.id(), followedPost.id()), feedIds(ana, mine));
+        } finally {
+            ScoringWeightTestSupport.restoreDefaults(scoringWeightRegistry);
+        }
+    }
+
+    private List<UUID> feedIds(Fixture reader, Set<UUID> only) {
+        return service.getFeed(reader.user, 0, 50).posts().stream()
+                .map(UserPostResponse::id)
+                .filter(only::contains)
+                .toList();
     }
 
     @Test

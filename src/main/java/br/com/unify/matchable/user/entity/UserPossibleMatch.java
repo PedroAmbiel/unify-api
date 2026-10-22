@@ -101,8 +101,9 @@ public class UserPossibleMatch extends PanacheEntityBase {
 
     /**
      * Matches mútuos do perfil, sem os que têm bloqueio em qualquer direção entre as
-     * partes: o match confirmado continua no banco (nunca delete aqui), mas some da
-     * lista de conexões dos dois, como o perfil (404) e o discovery.
+     * partes nem conta suspensa (semana 06): o match confirmado continua no banco
+     * (nunca delete aqui), mas some da lista de conexões dos dois, como o perfil
+     * (404) e o discovery.
      */
     public static PanacheQuery<UserPossibleMatch> findConfirmedForProfile(UserProfile profile) {
         return find(
@@ -112,6 +113,7 @@ public class UserPossibleMatch extends PanacheEntityBase {
                         + "  and not exists (select 1 from UserBlock b "
                         + "      where (b.blocker = m.starterProfile.user and b.blocked = m.pendingProfile.user) "
                         + "         or (b.blocker = m.pendingProfile.user and b.blocked = m.starterProfile.user)) "
+                        + "  and m.starterProfile.user.banned = false and m.pendingProfile.user.banned = false "
                         + "order by m.createdAt desc",
                 profile
         );
@@ -137,6 +139,7 @@ public class UserPossibleMatch extends PanacheEntityBase {
                         + "  and not exists (select 1 from UserBlock b "
                         + "      where (b.blocker = m.starterProfile.user and b.blocked = m.pendingProfile.user) "
                         + "         or (b.blocker = m.pendingProfile.user and b.blocked = m.starterProfile.user)) "
+                        + "  and m.starterProfile.user.banned = false and m.pendingProfile.user.banned = false "
                         + "order by m.matchedAt asc, m.id asc",
                 profile
         ).page(Page.ofSize(limit)).list();
@@ -170,7 +173,7 @@ public class UserPossibleMatch extends PanacheEntityBase {
 
     /**
      * Recusas cuja carência já expirou: o perfil volta ao pool de descoberta, mas
-     * penalizado (MatchScoringPolicy.PENALTY_RESHOWN_AFTER_COOLDOWN).
+     * penalizado (ScoringDimension.MATCH_PENALTY_RESHOWN_AFTER_COOLDOWN).
      */
     public static List<UserPossibleMatch> listExpiredDeclines(UserProfile profile, Instant threshold) {
         return list(

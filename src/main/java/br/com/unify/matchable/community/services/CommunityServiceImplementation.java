@@ -37,6 +37,9 @@ import br.com.unify.matchable.post.entity.PostComment;
 import br.com.unify.matchable.post.entity.PostLike;
 import br.com.unify.matchable.community.enums.CommunityMemberRole;
 import br.com.unify.matchable.community.enums.CommunityPrivacy;
+import br.com.unify.matchable.scoring.enums.ScoringDimension;
+import br.com.unify.matchable.scoring.services.ScoringWeightRegistry;
+import br.com.unify.matchable.scoring.services.ScoringWeights;
 import br.com.unify.matchable.user.entity.User;
 import br.com.unify.matchable.user.entity.UserProfile;
 import br.com.unify.matchable.user.entity.UserProfileImage;
@@ -91,9 +94,12 @@ public class CommunityServiceImplementation implements CommunityService {
     @Inject
     NotificationService notificationService;
 
+    @Inject
+    ScoringWeightRegistry scoringWeightRegistry;
+
     @Override
     public List<CommunityCategoryResponse> listCategories() {
-        return CommunityCategory.listAllOrderedByDescription().stream()
+        return CommunityCategory.listActiveOrderedByDescription().stream()
                 .map(this::toCategoryResponse)
                 .toList();
     }
@@ -343,7 +349,8 @@ public class CommunityServiceImplementation implements CommunityService {
     /*
      * Descoberta de comunidades: prioriza afinidade de categoria (categorias das
      * comunidades que o usuário já participa) e, dentro de cada grupo, ordena por
-     * engajamento (membros, publicações e curtidas). Mesmo trade-off de memória
+     * engajamento (membros, publicações e curtidas, com os pesos
+     * COMMUNITY_DISCOVERY_* do backoffice). Mesmo trade-off de memória
      * documentado em listCommunities: aceitável na escala atual.
      */
     @Override
@@ -363,20 +370,25 @@ public class CommunityServiceImplementation implements CommunityService {
                 .map(category -> category.id)
                 .collect(java.util.stream.Collectors.toSet());
 
-        java.util.Map<UUID, Long> engagementByCommunity = new java.util.HashMap<>();
+        ScoringWeights weights = scoringWeightRegistry.current();
+        double memberWeight = weights.get(ScoringDimension.COMMUNITY_DISCOVERY_MEMBER);
+        double postWeight = weights.get(ScoringDimension.COMMUNITY_DISCOVERY_POST);
+        double likeWeight = weights.get(ScoringDimension.COMMUNITY_DISCOVERY_LIKE);
+
+        java.util.Map<UUID, Double> engagementByCommunity = new java.util.HashMap<>();
         for (Community community : matches) {
             long members = CommunityMembership.countByCommunity(community);
             long posts = Post.count("community", community);
             long likes = PostLike.count("post.community", community);
-            engagementByCommunity.put(community.id, members * 3 + posts * 2 + likes);
+            engagementByCommunity.put(community.id, members * memberWeight + posts * postWeight + likes * likeWeight);
         }
 
         Comparator<Community> ordering = Comparator
                 .comparing((Community community) -> isUserMember(community, user))
                 .thenComparing(community -> community.category == null
                         || !affinityCategoryIds.contains(community.category.id))
-                .thenComparing(Comparator.<Community>comparingLong(community ->
-                        engagementByCommunity.getOrDefault(community.id, 0L)).reversed())
+                .thenComparing(Comparator.<Community>comparingDouble(community ->
+                        engagementByCommunity.getOrDefault(community.id, 0d)).reversed())
                 .thenComparing(community -> community.name, String.CASE_INSENSITIVE_ORDER);
 
         List<Community> ordered = matches.stream().sorted(ordering).toList();
@@ -391,7 +403,7 @@ public class CommunityServiceImplementation implements CommunityService {
         int resolvedSize = validateSize(size);
 
         PanacheQuery<Post> query = Post.find(
-                "community.active = true and community in "
+                "community.active = true and active = true and author.banned = false and community in "
                         + "(select membership.community from CommunityMembership membership where membership.userProfile.user = ?1) "
                         + "order by createdAt desc, id desc",
                 user

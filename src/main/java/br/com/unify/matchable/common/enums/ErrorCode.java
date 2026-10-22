@@ -134,6 +134,14 @@ public enum ErrorCode {
             "Token de redefinicao de senha invalido ou expirado"
     ),
 
+    // 400 e não 401: senha atual errada numa sessão VÁLIDA não pode fazer o
+    // cliente achar que o token expirou e tentar renovar ou deslogar.
+    USER_CURRENT_PASSWORD_INVALID(
+            4008,
+            400,
+            "Senha atual incorreta"
+    ),
+
     RESOURCE_NOT_FOUND(
             5001,
             404,

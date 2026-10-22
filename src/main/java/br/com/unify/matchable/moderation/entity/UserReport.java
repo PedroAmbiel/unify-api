@@ -66,20 +66,38 @@ public class UserReport extends PanacheEntityBase {
     @Column(name = "created_at", nullable = false)
     public Instant createdAt;
 
+    /** Preenchido quando a denúncia é encerrada (RESOLVED ou DISMISSED). */
     @Column(name = "resolved_at")
     public Instant resolvedAt;
 
+    /** Semana 06 (V31): nota do moderador, obrigatória para encerrar. */
+    @Column(name = "admin_note", length = 1000)
+    public String adminNote;
+
+    /** Semana 06 (V31): última mudança de status feita pelo backoffice. */
+    @Column(name = "reviewed_at")
+    public Instant reviewedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "fk_reviewed_by", foreignKey = @ForeignKey(name = "fk_user_reports_reviewed_by"))
+    public User reviewedBy;
+
+    /**
+     * Denúncia ainda pendente (aberta ou em análise) do mesmo denunciante para o
+     * mesmo alvo. Desde a semana 06 a moderação move a denúncia para
+     * UNDER_REVIEW; ela continua "em aberto" para quem denunciou.
+     */
     public static boolean existsOpenReport(User reporter, User reportedUser, Post reportedPost) {
         if (reportedPost == null) {
             return count(
-                    "reporter = ?1 and reportedUser = ?2 and reportedPost is null and status = ?3",
-                    reporter, reportedUser, UserReportStatus.OPEN
+                    "reporter = ?1 and reportedUser = ?2 and reportedPost is null and status in ?3",
+                    reporter, reportedUser, UserReportStatus.PENDING
             ) > 0;
         }
 
         return count(
-                "reporter = ?1 and reportedUser = ?2 and reportedPost = ?3 and status = ?4",
-                reporter, reportedUser, reportedPost, UserReportStatus.OPEN
+                "reporter = ?1 and reportedUser = ?2 and reportedPost = ?3 and status in ?4",
+                reporter, reportedUser, reportedPost, UserReportStatus.PENDING
         ) > 0;
     }
 

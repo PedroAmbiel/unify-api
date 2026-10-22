@@ -3,40 +3,41 @@ package br.com.unify.matchable.user.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Arrays;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import br.com.unify.matchable.scoring.enums.ScoringDimension;
+import br.com.unify.matchable.scoring.enums.ScoringGroup;
+import br.com.unify.matchable.scoring.enums.ScoringUnit;
 
 class MatchScoringPolicyTest {
 
     @Test
-    @DisplayName("A soma dos pesos deve ser exatamente 100")
-    void weightsMustSumExactlyOneHundred() {
-        double sum = MatchScoringPolicy.WEIGHT_COMMUNICATION
-                + MatchScoringPolicy.WEIGHT_INTERESTS
-                + MatchScoringPolicy.WEIGHT_CONNECTION_TYPE
-                + MatchScoringPolicy.WEIGHT_ACCESSIBILITY_NEEDS
-                + MatchScoringPolicy.WEIGHT_LIFESTYLE
-                + MatchScoringPolicy.WEIGHT_AUTONOMY
-                + MatchScoringPolicy.WEIGHT_LOVE_LANGUAGE
-                + MatchScoringPolicy.WEIGHT_ENERGY
-                + MatchScoringPolicy.WEIGHT_DISTANCE
-                + MatchScoringPolicy.WEIGHT_AGE_DIFFERENCE;
+    @DisplayName("As fatias padrão dos Encontros somam exatamente 100")
+    void defaultWeightsMustSumExactlyOneHundred() {
+        double sum = Arrays.stream(ScoringDimension.values())
+                .filter(dimension -> dimension.group() == ScoringGroup.MATCH)
+                .filter(dimension -> dimension.unit() == ScoringUnit.PERCENT)
+                .mapToDouble(ScoringDimension::defaultWeight)
+                .sum();
 
-        assertEquals(MatchScoringPolicy.TOTAL_WEIGHT, sum, 0.0001d);
+        assertEquals(100d, sum, 0.0001d);
     }
 
     @Test
-    @DisplayName("Comunicação continua sendo o maior peso individual")
+    @DisplayName("Comunicação continua sendo o maior peso padrão")
     void communicationRemainsTheHeaviestFactor() {
-        assertTrue(MatchScoringPolicy.WEIGHT_COMMUNICATION > MatchScoringPolicy.WEIGHT_INTERESTS);
-        assertTrue(MatchScoringPolicy.WEIGHT_INTERESTS > MatchScoringPolicy.WEIGHT_CONNECTION_TYPE);
+        assertTrue(ScoringDimension.MATCH_COMMUNICATION.defaultWeight() > ScoringDimension.MATCH_INTERESTS.defaultWeight());
+        assertTrue(ScoringDimension.MATCH_INTERESTS.defaultWeight() > ScoringDimension.MATCH_CONNECTION_TYPE.defaultWeight());
     }
 
     @Test
-    @DisplayName("Acessibilidade + autonomia somam 20, como prescrito no MATCH_ALG_GUIDE")
+    @DisplayName("Acessibilidade + autonomia somam 20 no padrão, como prescrito no MATCH_ALG_GUIDE")
     void accessibilityAxisMatchesGuide() {
         assertEquals(20d,
-                MatchScoringPolicy.WEIGHT_ACCESSIBILITY_NEEDS + MatchScoringPolicy.WEIGHT_AUTONOMY,
+                ScoringDimension.MATCH_ACCESSIBILITY_NEEDS.defaultWeight() + ScoringDimension.MATCH_AUTONOMY.defaultWeight(),
                 0.0001d);
     }
 

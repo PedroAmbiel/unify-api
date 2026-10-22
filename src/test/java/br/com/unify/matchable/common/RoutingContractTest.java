@@ -53,7 +53,18 @@ class RoutingContractTest {
             // semana 05 — notificações e post único (deep link)
             "/notifications",
             "/notifications/unread-count",
-            "/users/posts/" + SAMPLE_UUID
+            "/users/posts/" + SAMPLE_UUID,
+            // semana 06 — identidade da conta e backoffice
+            "/users/me",
+            "/admin/lookups",
+            "/admin/lookups/genders",
+            "/admin/reports",
+            "/admin/reports/" + SAMPLE_UUID,
+            "/admin/reports/" + SAMPLE_UUID + "/post-media",
+            "/admin/users",
+            "/admin/users/" + SAMPLE_UUID,
+            "/admin/scoring-weights",
+            "/admin/scoring-weights/feed"
     })
     void protectedGetRouteRespondsUnauthorizedNotNotFound(String path) {
         given()
@@ -116,9 +127,32 @@ class RoutingContractTest {
                 .then()
                 .statusCode(equalTo(401));
 
+        // "Minha conta" do backoffice: mesma regra de sombreamento de /users/me.
+        given()
+                .contentType(ContentType.JSON)
+                .body("{}")
+                .when().put("/users/me/account")
+                .then()
+                .statusCode(equalTo(401));
+
+        given()
+                .contentType(ContentType.JSON)
+                .body("{}")
+                .when().put("/users/me/account/password")
+                .then()
+                .statusCode(equalTo(401));
+
         given()
                 .multiPart("durationSeconds", "10")
                 .when().put("/users/me/profile/audio")
+                .then()
+                .statusCode(equalTo(401));
+
+        // Pesos de pontuação do backoffice.
+        given()
+                .contentType(ContentType.JSON)
+                .body("{}")
+                .when().put("/admin/scoring-weights/match")
                 .then()
                 .statusCode(equalTo(401));
 

@@ -14,6 +14,7 @@ import br.com.unify.matchable.common.image.ImageResponses;
 import br.com.unify.matchable.common.exceptions.PayloadTooLargeException;
 import br.com.unify.matchable.common.media.AudioContent;
 import br.com.unify.matchable.common.resources.AuthenticatedResource;
+import br.com.unify.matchable.user.dto.CurrentUserResponse;
 import br.com.unify.matchable.user.dto.UserMatchPreferencesUpsertRequest;
 import br.com.unify.matchable.user.dto.UserProfileUpsertRequest;
 import br.com.unify.matchable.user.entity.User;
@@ -66,6 +67,21 @@ public class UserProfileResource extends AuthenticatedResource {
             defaultValue = "3145728"
     )
     long maxPresentationAudioBytes;
+
+    /**
+     * Semana 06: identidade da conta (com papel e estado de banimento). Fica
+     * aqui porque qualquer outra classe com {@code @Path("/users")} perderia
+     * {@code /me} para este resource.
+     */
+    @GET
+    @Transactional
+    public Response getCurrentUser() {
+        User user = findCurrentUser();
+        if (user == null) {
+            return userNotFoundResponse();
+        }
+        return Response.ok(CurrentUserResponse.from(user)).build();
+    }
 
     @GET
     @Path("/profile")

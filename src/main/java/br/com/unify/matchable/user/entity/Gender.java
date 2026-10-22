@@ -1,19 +1,15 @@
 package br.com.unify.matchable.user.entity;
 
-import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
-import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "genders")
-public class Gender extends PanacheEntityBase {
+public class Gender extends LookupEntity {
 
-    @Id
-    @Column(name = "id", nullable = false, updatable = false)
-    public Integer id;
-
-    @Column(name = "description", nullable = false, unique = true)
-    public String description;
+    /**
+     * "Prefiro não informar": o discovery sempre inclui este gênero, seja qual
+     * for a preferência. O backoffice não deixa desativar nem excluir.
+     */
+    public static final int UNDISCLOSED_ID = 4;
 }

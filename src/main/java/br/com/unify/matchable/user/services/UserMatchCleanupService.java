@@ -18,7 +18,7 @@ public class UserMatchCleanupService {
 
     /**
      * Retenção da linha de recusa. É MAIOR que a carência de propósito: passada a carência
-     * o perfil volta ao feed, mas penalizado (MatchScoringPolicy.PENALTY_RESHOWN_AFTER_COOLDOWN),
+     * o perfil volta ao feed, mas penalizado (ScoringDimension.MATCH_PENALTY_RESHOWN_AFTER_COOLDOWN),
      * e essa penalidade depende da linha ainda existir. Apagar pela carência anulava a penalidade.
      */
     @ConfigProperty(name = "unify.match.decline-retention-days", defaultValue = "180")

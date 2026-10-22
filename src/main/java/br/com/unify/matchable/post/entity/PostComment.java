@@ -74,13 +74,16 @@ public class PostComment extends PanacheEntityBase {
         return queryByPost(post).list();
     }
 
-    /** Ordenacao estavel para paginacao: cronologica (indice created_at). */
+    /**
+     * Ordenacao estavel para paginacao: cronologica (indice created_at).
+     * Semana 06: comentario de autor banido some da lista e das contagens.
+     */
     public static PanacheQuery<PostComment> queryByPost(Post post) {
-        return find("post = ?1 and active = true order by createdAt asc, id asc", post);
+        return find("post = ?1 and active = true and author.banned = false order by createdAt asc, id asc", post);
     }
 
     public static long countByPost(Post post) {
-        return count("post = ?1 and active = true", post);
+        return count("post = ?1 and active = true and author.banned = false", post);
     }
 
     public static boolean existsByPostAndUser(Post post, User user) {
@@ -98,7 +101,7 @@ public class PostComment extends PanacheEntityBase {
             return counts;
         }
         List<Object[]> rows = getEntityManager()
-                .createQuery("select c.post.id, count(c) from PostComment c where c.post.id in :ids and c.active = true group by c.post.id", Object[].class)
+                .createQuery("select c.post.id, count(c) from PostComment c where c.post.id in :ids and c.active = true and c.author.banned = false group by c.post.id", Object[].class)
                 .setParameter("ids", postIds)
                 .getResultList();
         for (Object[] row : rows) {

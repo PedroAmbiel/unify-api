@@ -31,6 +31,10 @@ import br.com.unify.matchable.common.UUIDv7Generator;
 import br.com.unify.matchable.common.dto.PageParams;
 import br.com.unify.matchable.notification.enums.NotificationType;
 import br.com.unify.matchable.notification.services.NotificationService;
+import br.com.unify.matchable.scoring.enums.ScoringDimension;
+import br.com.unify.matchable.scoring.enums.ScoringGroup;
+import br.com.unify.matchable.scoring.services.ScoringWeightRegistry;
+import br.com.unify.matchable.scoring.services.ScoringWeights;
 import br.com.unify.matchable.user.dto.MatchDecisionRequest;
 import br.com.unify.matchable.user.dto.MatchDecisionResponse;
 import br.com.unify.matchable.user.dto.MutualMatchPageResponse;
@@ -65,7 +69,7 @@ public class UserMatchServiceImplementation implements UserMatchService {
     private static final int MAX_AGE_EXPANSION_YEARS = 10;
     private static final int AGE_EXPANSION_STEP_YEARS = 5;
     private static final int MINIMUM_ALLOWED_AGE = 18;
-    private static final int UNDISCLOSED_GENDER_ID = 4;
+    private static final int UNDISCLOSED_GENDER_ID = Gender.UNDISCLOSED_ID;
     private static final String MATCH_IMAGE_DOWNLOAD_URL_PREFIX = "/users/me/matches/images/";
     private static final String MATCH_IMAGE_NOT_FOUND_MESSAGE = "Imagem de match não encontrada";
     private static final String MUTUAL_MATCH_NOT_FOUND_MESSAGE = "Match não encontrado";
@@ -98,6 +102,10 @@ public class UserMatchServiceImplementation implements UserMatchService {
 
     @Inject
     NotificationService notificationService;
+
+    /** Pesos das dimensões (backoffice). Nulo só em teste unitário com {@code new}: aí valem os padrões. */
+    @Inject
+    ScoringWeightRegistry scoringWeightRegistry;
 
     @ConfigProperty(name = "unify.match.default-max-distance-km", defaultValue = "60")
     int defaultMaxDistanceKm = 60;
@@ -160,7 +168,8 @@ public class UserMatchServiceImplementation implements UserMatchService {
                 currentAge,
                 candidateRows,
                 candidateProfiles,
-                reshownProfileIds
+                reshownProfileIds,
+                currentWeights()
         );
 
         int remainingSlots = Math.max(0, TARGET_MATCH_COUNT - Math.min(TARGET_MATCH_COUNT, priorityInboundProfileIds.size()));
@@ -461,6 +470,9 @@ public class UserMatchServiceImplementation implements UserMatchService {
      * absolutos enquanto um perfil que não preencheu NENHUMA preferência ganhava ~25 pontos
      * "neutros". A normalização faz o score responder à QUALIDADE das informações comuns,
      * e a cobertura responde pela QUANTIDADE (via teto de baixa confiança).
+     *
+     * Pesos e penalidades vêm de {@code weights} (backoffice); "100" na cobertura é a soma das
+     * fatias, que a validação do backoffice mantém em 100.
      */
     double calculateCompatibilityScore(
             UserProfile currentProfile,
@@ -470,41 +482,56 @@ public class UserMatchServiceImplementation implements UserMatchService {
             UserMatchPreference candidatePreference,
             Integer candidateAge,
             Double distanceKm,
-            ScoringContext context
+            ScoringContext context,
+            ScoringWeights weights
     ) {
         List<FactorScore> factors = List.of(
-                scoreCommunicationViability(currentProfile.communicationForms, candidateProfile.communicationForms),
-                scoreSharedInterests(currentProfile.interestTypes, candidateProfile.interestTypes),
-                scoreConnectionTypeCompatibility(currentPreference, candidatePreference),
-                scoreAccessibilityNeeds(currentProfile, candidateProfile, currentPreference, candidatePreference),
+                scoreCommunicationViability(
+                        currentProfile.communicationForms,
+                        candidateProfile.communicationForms,
+                        weights.get(ScoringDimension.MATCH_COMMUNICATION)),
+                scoreSharedInterests(
+                        currentProfile.interestTypes,
+                        candidateProfile.interestTypes,
+                        weights.get(ScoringDimension.MATCH_INTERESTS)),
+                scoreConnectionTypeCompatibility(
+                        currentPreference,
+                        candidatePreference,
+                        weights.get(ScoringDimension.MATCH_CONNECTION_TYPE)),
+                scoreAccessibilityNeeds(
+                        currentProfile,
+                        candidateProfile,
+                        currentPreference,
+                        candidatePreference,
+                        weights.get(ScoringDimension.MATCH_ACCESSIBILITY_NEEDS)),
                 scoreReciprocalSetPreference(
                         currentProfile.lifestyleTypes,
                         candidateProfile.lifestyleTypes,
                         currentPreference == null ? null : currentPreference.lifestyleSimilarity,
                         candidatePreference == null ? null : candidatePreference.lifestyleSimilarity,
                         lifestyleType -> lifestyleType.id,
-                        MatchScoringPolicy.WEIGHT_LIFESTYLE),
+                        weights.get(ScoringDimension.MATCH_LIFESTYLE)),
                 scoreReciprocalLevelPreference(
                         currentProfile.autonomyLevel == null ? null : currentProfile.autonomyLevel.id,
                         candidateProfile.autonomyLevel == null ? null : candidateProfile.autonomyLevel.id,
                         currentPreference == null ? null : currentPreference.autonomyCompatibility,
                         candidatePreference == null ? null : candidatePreference.autonomyCompatibility,
-                        MatchScoringPolicy.WEIGHT_AUTONOMY),
+                        weights.get(ScoringDimension.MATCH_AUTONOMY)),
                 scoreReciprocalSetPreference(
                         currentProfile.loveLanguages,
                         candidateProfile.loveLanguages,
                         currentPreference == null ? null : currentPreference.loveLanguageSimilarity,
                         candidatePreference == null ? null : candidatePreference.loveLanguageSimilarity,
                         loveLanguage -> loveLanguage.id,
-                        MatchScoringPolicy.WEIGHT_LOVE_LANGUAGE),
+                        weights.get(ScoringDimension.MATCH_LOVE_LANGUAGE)),
                 scoreReciprocalLevelPreference(
                         currentProfile.energyLevel == null ? null : currentProfile.energyLevel.id,
                         candidateProfile.energyLevel == null ? null : candidateProfile.energyLevel.id,
                         currentPreference == null ? null : currentPreference.energyLevelSimilarity,
                         candidatePreference == null ? null : candidatePreference.energyLevelSimilarity,
-                        MatchScoringPolicy.WEIGHT_ENERGY),
-                scoreDistance(distanceKm),
-                scoreAgeDifference(currentAge, candidateAge)
+                        weights.get(ScoringDimension.MATCH_ENERGY)),
+                scoreDistance(distanceKm, weights.get(ScoringDimension.MATCH_DISTANCE)),
+                scoreAgeDifference(currentAge, candidateAge, weights.get(ScoringDimension.MATCH_AGE_DIFFERENCE))
         );
 
         double obtainedSum = 0d;
@@ -517,20 +544,39 @@ public class UserMatchServiceImplementation implements UserMatchService {
             applicableWeightSum += factor.weight();
         }
 
-        if (applicableWeightSum <= 0d) {
+        double totalWeight = weights.percentTotal(ScoringGroup.MATCH);
+        if (applicableWeightSum <= 0d || totalWeight <= 0d) {
             return 0d; // não há absolutamente nenhuma informação em comum
         }
 
         double score = 100d * obtainedSum / applicableWeightSum;
-        double coverage = applicableWeightSum / MatchScoringPolicy.TOTAL_WEIGHT;
+        double coverage = applicableWeightSum / totalWeight;
 
         if (coverage < MatchScoringPolicy.MIN_CONFIDENT_COVERAGE) {
             score = Math.min(score, MatchScoringPolicy.LOW_CONFIDENCE_SCORE_CAP);
         }
 
-        score -= penalties(context);
+        score -= penalties(context, weights);
 
         return roundToTwoDecimals(Math.max(0d, Math.min(100d, score)));
+    }
+
+    /** Pesos vigentes no momento da chamada. */
+    double calculateCompatibilityScore(
+            UserProfile currentProfile,
+            UserMatchPreference currentPreference,
+            Integer currentAge,
+            UserProfile candidateProfile,
+            UserMatchPreference candidatePreference,
+            Integer candidateAge,
+            Double distanceKm,
+            ScoringContext context
+    ) {
+        return calculateCompatibilityScore(
+                currentProfile, currentPreference, currentAge,
+                candidateProfile, candidatePreference, candidateAge,
+                distanceKm, context, currentWeights()
+        );
     }
 
     /** Sobrecarga de compatibilidade com o teste existente (distância sempre conhecida). */
@@ -550,19 +596,24 @@ public class UserMatchServiceImplementation implements UserMatchService {
         );
     }
 
-    private double penalties(ScoringContext context) {
+    /** Foto dos pesos para uma busca inteira; sem CDI (teste unitário), os padrões do código. */
+    ScoringWeights currentWeights() {
+        return scoringWeightRegistry == null ? ScoringWeights.defaults() : scoringWeightRegistry.current();
+    }
+
+    private double penalties(ScoringContext context, ScoringWeights weights) {
         if (context == null) {
             return 0d;
         }
         double total = 0d;
         if (context.genderNotReciprocal()) {
-            total += MatchScoringPolicy.PENALTY_GENDER_NOT_RECIPROCAL;
+            total += weights.get(ScoringDimension.MATCH_PENALTY_GENDER_NOT_RECIPROCAL);
         }
         if (context.ageNotReciprocal()) {
-            total += MatchScoringPolicy.PENALTY_AGE_NOT_RECIPROCAL;
+            total += weights.get(ScoringDimension.MATCH_PENALTY_AGE_NOT_RECIPROCAL);
         }
         if (context.reshownAfterCooldown()) {
-            total += MatchScoringPolicy.PENALTY_RESHOWN_AFTER_COOLDOWN;
+            total += weights.get(ScoringDimension.MATCH_PENALTY_RESHOWN_AFTER_COOLDOWN);
         }
         return total;
     }
@@ -613,10 +664,9 @@ public class UserMatchServiceImplementation implements UserMatchService {
      */
     private FactorScore scoreCommunicationViability(
             Collection<CommunicationForm> currentForms,
-            Collection<CommunicationForm> candidateForms
+            Collection<CommunicationForm> candidateForms,
+            double weight
     ) {
-        double weight = MatchScoringPolicy.WEIGHT_COMMUNICATION;
-
         Set<Integer> currentIds = extractIds(currentForms, form -> form.id);
         Set<Integer> candidateIds = extractIds(candidateForms, form -> form.id);
 
@@ -646,10 +696,9 @@ public class UserMatchServiceImplementation implements UserMatchService {
      */
     private FactorScore scoreSharedInterests(
             Collection<InterestType> currentInterests,
-            Collection<InterestType> candidateInterests
+            Collection<InterestType> candidateInterests,
+            double weight
     ) {
-        double weight = MatchScoringPolicy.WEIGHT_INTERESTS;
-
         Set<Integer> currentIds = extractIds(currentInterests, interest -> interest.id);
         Set<Integer> candidateIds = extractIds(candidateInterests, interest -> interest.id);
 
@@ -676,10 +725,9 @@ public class UserMatchServiceImplementation implements UserMatchService {
      */
     private FactorScore scoreConnectionTypeCompatibility(
             UserMatchPreference currentPreference,
-            UserMatchPreference candidatePreference
+            UserMatchPreference candidatePreference,
+            double weight
     ) {
-        double weight = MatchScoringPolicy.WEIGHT_CONNECTION_TYPE;
-
         Integer currentTypeId = currentPreference == null || currentPreference.connectionType == null
                 ? null
                 : currentPreference.connectionType.id;
@@ -715,10 +763,9 @@ public class UserMatchServiceImplementation implements UserMatchService {
             UserProfile currentProfile,
             UserProfile candidateProfile,
             UserMatchPreference currentPreference,
-            UserMatchPreference candidatePreference
+            UserMatchPreference candidatePreference,
+            double weight
     ) {
-        double weight = MatchScoringPolicy.WEIGHT_ACCESSIBILITY_NEEDS;
-
         boolean currentEmpty = currentProfile.accessibilityNeeds == null || currentProfile.accessibilityNeeds.isEmpty();
         boolean candidateEmpty = candidateProfile.accessibilityNeeds == null || candidateProfile.accessibilityNeeds.isEmpty();
 
@@ -867,9 +914,7 @@ public class UserMatchServiceImplementation implements UserMatchService {
      * Curva linear decrescente. distanceKm == null significa que pelo menos um dos perfis
      * não tem coordenada ativa: o fator sai da conta (não é 1 ponto arbitrário, como antes).
      */
-    private FactorScore scoreDistance(Double distanceKm) {
-        double weight = MatchScoringPolicy.WEIGHT_DISTANCE;
-
+    private FactorScore scoreDistance(Double distanceKm, double weight) {
         if (distanceKm == null || distanceKm < 0d) {
             return FactorScore.notApplicable(weight);
         }
@@ -885,9 +930,7 @@ public class UserMatchServiceImplementation implements UserMatchService {
         return FactorScore.ratio(ratio, weight);
     }
 
-    private FactorScore scoreAgeDifference(Integer currentAge, Integer candidateAge) {
-        double weight = MatchScoringPolicy.WEIGHT_AGE_DIFFERENCE;
-
+    private FactorScore scoreAgeDifference(Integer currentAge, Integer candidateAge, double weight) {
         if (currentAge == null || candidateAge == null) {
             return FactorScore.notApplicable(weight);
         }
@@ -1024,7 +1067,8 @@ public class UserMatchServiceImplementation implements UserMatchService {
             Integer currentAge,
             LinkedHashMap<UUID, CandidateSearchRow> candidateRows,
             LinkedHashMap<UUID, UserProfile> candidateProfiles,
-            Set<UUID> reshownProfileIds
+            Set<UUID> reshownProfileIds,
+            ScoringWeights weights
     ) {
         List<ScoredCandidate> scoredCandidates = new ArrayList<>();
 
@@ -1054,7 +1098,8 @@ public class UserMatchServiceImplementation implements UserMatchService {
                     candidatePreference,
                     candidateAge,
                     candidateRow.distanceKm(),
-                    context
+                    context,
+                    weights
             );
 
             scoredCandidates.add(new ScoredCandidate(candidateRow.profileId(), score, candidateRow.distanceKm()));
@@ -1186,7 +1231,7 @@ public class UserMatchServiceImplementation implements UserMatchService {
 
     /**
      * Perfis cuja recusa já saiu da carência: voltam ao pool, mas com penalidade
-     * (MatchScoringPolicy.PENALTY_RESHOWN_AFTER_COOLDOWN) para reaparecerem no fim da fila.
+     * (ScoringDimension.MATCH_PENALTY_RESHOWN_AFTER_COOLDOWN) para reaparecerem no fim da fila.
      */
     private Set<UUID> collectReshownProfileIds(UserProfile currentProfile, Instant declineThreshold) {
         LinkedHashSet<UUID> reshownProfileIds = new LinkedHashSet<>();
@@ -1437,6 +1482,7 @@ public class UserMatchServiceImplementation implements UserMatchService {
     private String commonCandidateFilters(List<Integer> desiredGenderIds, Integer minAge, Integer maxAge) {
         return """
                   and u.verified = true
+                  and u.banned = false -- Semana 06: conta suspensa some do discovery
                   and (up.fk_gender in (%s) or up.fk_gender = 4) -- Id 4 é "prefiro não informar": entra em consideração
                   %s
                   %s
@@ -1522,6 +1568,13 @@ public class UserMatchServiceImplementation implements UserMatchService {
                 .setParameter("viewerId", viewerProfile.id)
                 .setParameter("profileIds", candidates)
                 .setParameter("declineThreshold", declineThreshold())
+                .getResultList());
+
+        // Semana 06: conta suspensa não aparece nem como convite recebido.
+        excluded.addAll(entityManager.createQuery(
+                        "select p.id from UserProfile p where p.id in :profileIds and p.user.banned = true",
+                        UUID.class)
+                .setParameter("profileIds", candidates)
                 .getResultList());
 
         // Mesmo bloqueio de privacyExclusionClause() (sem o discoverable: ver o javadoc de lá).

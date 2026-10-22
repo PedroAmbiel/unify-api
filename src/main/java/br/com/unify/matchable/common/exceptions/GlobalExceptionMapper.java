@@ -22,6 +22,7 @@ import java.util.NoSuchElementException;
  * - ForbiddenException       -> 403 AUTH_FORBIDDEN. Tipo proprio (nao
  *   SecurityException) para nao capturar SecurityException incidental de
  *   biblioteca.
+ * - UserBannedException      -> 403 USER_DISABLED com o motivo do banimento.
  * - IllegalArgumentException -> 400 VALIDATION_INVALID_ARGUMENT (generico).
  *   NUNCA 409/USER_ALREADY_EXISTS: conflito de usuario e responsabilidade do
  *   AuthResource, que ja trata esse caso explicitamente no /auth/signup.
@@ -69,6 +70,12 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
         if (exception instanceof ForbiddenException forbiddenException) {
             LOG.debugf("ForbiddenException: %s", forbiddenException.getMessage());
             return build(ErrorCode.AUTH_FORBIDDEN, forbiddenException.getMessage());
+        }
+
+        // 4b. Conta banida (403 USER_DISABLED). Nao e erro de sistema: so debug.
+        if (exception instanceof UserBannedException userBannedException) {
+            LOG.debugf("UserBannedException: %s", userBannedException.getBanReason());
+            return build(ErrorCode.USER_DISABLED, userBannedException.getBanReason());
         }
 
         // 5. Argumento invalido de negocio (400) - generico e honesto.

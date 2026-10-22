@@ -103,31 +103,35 @@ public class Post extends PanacheEntityBase {
         return queryByCommunity(community).list();
     }
 
-    /** Ordenacao estavel para paginacao: mais recentes primeiro (indice created_at). */
+    /**
+     * Ordenacao estavel para paginacao: mais recentes primeiro (indice created_at).
+     * Semana 06: post de autor banido some para todos ({@code author.banned = false}
+     * em todas as consultas de leitura abaixo).
+     */
     public static PanacheQuery<Post> queryByCommunity(Community community) {
-        return find("community = ?1 and active = true order by createdAt desc, id desc", community);
+        return find("community = ?1 and active = true and author.banned = false order by createdAt desc, id desc", community);
     }
 
     public static Post findByIdWithActiveCommunity(UUID id) {
-        return find("id = ?1 and active = true and community.active = true", id).firstResult();
+        return find("id = ?1 and active = true and community.active = true and author.banned = false", id).firstResult();
     }
 
     // ------------------------------------------------- feed pessoal (origin = PERSONAL)
 
     public static Post findActivePersonalById(UUID id) {
-        return find("id = ?1 and origin = ?2 and active = true", id, PostOrigin.PERSONAL).firstResult();
+        return find("id = ?1 and origin = ?2 and active = true and author.banned = false", id, PostOrigin.PERSONAL).firstResult();
     }
 
     public static PanacheQuery<Post> queryPersonalByAuthor(User author) {
         return find(
-                "author = ?1 and origin = ?2 and active = true order by createdAt desc, id desc",
+                "author = ?1 and origin = ?2 and active = true and author.banned = false order by createdAt desc, id desc",
                 author, PostOrigin.PERSONAL
         );
     }
 
     public static PanacheQuery<Post> queryPersonalByAuthorIds(Collection<UUID> authorUserIds) {
         return find(
-                "author.id in ?1 and origin = ?2 and active = true order by createdAt desc, id desc",
+                "author.id in ?1 and origin = ?2 and active = true and author.banned = false order by createdAt desc, id desc",
                 authorUserIds, PostOrigin.PERSONAL
         );
     }

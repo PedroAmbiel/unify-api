@@ -51,20 +51,22 @@ public class UserFollow extends PanacheEntityBase {
         return find("follower = ?1 and followed = ?2", follower, followed).firstResult();
     }
 
+    // Semana 06: conta suspensa some das listas e das contagens de seguidores.
+
     public static long countFollowing(UserProfile follower) {
-        return count("follower", follower);
+        return count("follower = ?1 and followed.user.banned = false", follower);
     }
 
     public static long countFollowers(UserProfile followed) {
-        return count("followed", followed);
+        return count("followed = ?1 and follower.user.banned = false", followed);
     }
 
     public static PanacheQuery<UserFollow> queryFollowing(UserProfile follower) {
-        return find("follower = ?1 order by createdAt desc, id desc", follower);
+        return find("follower = ?1 and followed.user.banned = false order by createdAt desc, id desc", follower);
     }
 
     public static PanacheQuery<UserFollow> queryFollowers(UserProfile followed) {
-        return find("followed = ?1 order by createdAt desc, id desc", followed);
+        return find("followed = ?1 and follower.user.banned = false order by createdAt desc, id desc", followed);
     }
 
     /** Ids de {@code User} dos perfis seguidos: o autor de post é User, não UserProfile. */

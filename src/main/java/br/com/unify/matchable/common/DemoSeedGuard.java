@@ -20,6 +20,7 @@ import org.jboss.logging.Logger;
  * O heuristico casa exatamente com o que os seeds produzem:
  * - import-dev.sql   -> teste@gmail.com, verificar@gmail.com
  * - import-users.sql -> seed.userNN@unify.dev
+ * - import-admin.sql -> admin@unify.dev (conta ADMIN de senha publica, semana 06)
  */
 @ApplicationScoped
 public class DemoSeedGuard {
@@ -29,6 +30,7 @@ public class DemoSeedGuard {
     private static final String SEED_EMAIL_PATTERN = "seed.user%@unify.dev";
     private static final String DEMO_EMAIL_A = "teste@gmail.com";
     private static final String DEMO_EMAIL_B = "verificar@gmail.com";
+    private static final String DEMO_ADMIN_EMAIL = "admin@unify.dev";
 
     @Inject
     EntityManager entityManager;
@@ -44,11 +46,13 @@ public class DemoSeedGuard {
                         "select count(u) from User u "
                                 + "where u.email like :seedPattern "
                                 + "   or u.email = :demoEmailA "
-                                + "   or u.email = :demoEmailB",
+                                + "   or u.email = :demoEmailB"
+                                + "   or u.email = :demoAdminEmail",
                         Long.class)
                 .setParameter("seedPattern", SEED_EMAIL_PATTERN)
                 .setParameter("demoEmailA", DEMO_EMAIL_A)
                 .setParameter("demoEmailB", DEMO_EMAIL_B)
+                .setParameter("demoAdminEmail", DEMO_ADMIN_EMAIL)
                 .getSingleResult();
 
         if (demoUsers > 0) {

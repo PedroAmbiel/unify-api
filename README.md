@@ -74,6 +74,111 @@ Na suíte de testes o push fica desligado (`%test.unify.push.enabled=false`);
 `FcmPushGatewayTest` sobe um servidor HTTP falso (token + `messages:send`) e
 `PushDispatchServiceTest` troca o gateway por um stub (`QuarkusMock`).
 
+## Administração e moderação (semana 06)
+
+O backoffice web é o projeto irmão `unify-backoffice` (React + Vite,
+`http://localhost:5173`). Ele usa esta mesma API, nas rotas `/admin/*`.
+
+### Papel ADMIN
+
+`users.role` (V27) aceita `USER` ou `ADMIN`. O JWT de admin sai com
+`groups = ["user", "admin"]` (admin continua usando o app) e a claim `role`.
+Toda rota `/admin/*` é `@RolesAllowed("admin")`: usuário comum recebe 403,
+sem token 401.
+
+**Não existe endpoint que mude papel.** Para promover uma conta já cadastrada:
+
+```bash
+# no boot (AdminBootstrapService), e-mails separados por vírgula
+ADMIN_BOOTSTRAP_EMAILS="pessoa@exemplo.com" ./mvnw quarkus:dev
+
+# ou direto no banco
+psql -c "update users set role = 'ADMIN' where email = 'pessoa@exemplo.com';"
+```
+
+O papel entra no token no próximo login **ou** na próxima renovação
+(`/auth/refresh` remonta os grupos a partir do banco).
+
+Em `%dev`, `import-admin.sql` cria `admin@unify.dev` / `Admin@123`
+(comente os inserts para subir sem admin). Essa conta é tratada como dado de
+demonstração pelo `DemoSeedGuard`: fora de dev/test o boot aborta se ela existir.
+
+### Banimento
+
+`POST /admin/users/{id}/ban {"reason": "..."}` (10..500 caracteres) marca
+`banned/banned_at/ban_reason` (V28, constraint `ck_users_ban_consistency`) e:
+
+| Camada | Efeito |
+|---|---|
+| `/auth/signin` | 403 `USER_DISABLED` (4003) com o motivo — só depois de conferir a senha, para não revelar o ban a quem não tem a credencial |
+| `/auth/refresh` | 403 `USER_DISABLED`, mesmo com refresh token emitido antes do ban |
+| Sessões | todas revogadas na hora; tokens de push apagados |
+| Access token já emitido | `BannedUserFilter` devolve 403 `USER_DISABLED` em qualquer rota autenticada |
+| Visibilidade | some do discovery (inclusive convites), matches mútuos, perfil público (404, com galeria e áudio), seguidores/seguindo, feed, posts, comentários e membros de comunidade |
+| Denúncias | as pendentes contra a conta viram `RESOLVED`; cada denunciante recebe **um** aviso `REPORT_UPDATE` |
+
+Admin não bane admin nem a si mesmo (409). `POST /admin/users/{id}/unban`
+limpa os três campos; as sessões antigas continuam revogadas.
+
+### Rotas `/admin/*`
+
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/admin/lookups` | 12 catálogos com total e ativos |
+| GET | `/admin/lookups/{tipo}?includeInactive=` | Itens com contagem de uso |
+| POST | `/admin/lookups/{tipo}` | Cria (`{description, ionicIcon?}`); id vem de `seq_<tabela>_id` (V30) |
+| PUT | `/admin/lookups/{tipo}/{id}` | Edita descrição/ícone |
+| PUT | `/admin/lookups/{tipo}/{id}/active` | Ativa/desativa (`{active}`); inativo some das opções do app, continua válido em quem já usa |
+| DELETE | `/admin/lookups/{tipo}/{id}` | Exclui só item sem uso; senão 409 sugerindo desativar |
+| GET | `/admin/reports?status=&reportedUserId=&page=&size=` | Fila (`status`: ALL, PENDING, OPEN, UNDER_REVIEW, RESOLVED, DISMISSED) |
+| GET | `/admin/reports/{id}` | Detalhe + ficha e histórico do denunciado |
+| GET | `/admin/reports/{id}/post-media` | Imagem da publicação denunciada |
+| PUT | `/admin/reports/{id}/status` | `{status, adminNote}`; encerrar exige nota (≥ 10) e avisa o denunciante; encerrada não reabre |
+| GET | `/admin/users?query=&filter=&page=&size=` | Busca (`filter`: ALL, ACTIVE, BANNED, ADMIN) |
+| GET | `/admin/users/{id}` | Ficha |
+| POST | `/admin/users/{id}/ban` · `/unban` | Banimento |
+| GET | `/admin/scoring-weights` · `/{grupo}` | Pesos de pontuação (`match`, `feed`, `community-discovery`) com padrão, limites, catálogo de origem e revisão |
+| PUT | `/admin/scoring-weights/{grupo}` | `{expectedRevision, weights: {"MATCH_COMMUNICATION": 25, ...}}`; vale na hora (ver abaixo) |
+
+"Minha conta" (qualquer usuário autenticado, usada pelo backoffice):
+
+| Método | Rota | Descrição |
+|---|---|---|
+| PUT | `/users/me/account` | `{name, lastName, cellphone}`; celular só dígitos (10–13), vazio apaga, 409 se for de outra conta |
+| PUT | `/users/me/account/password` | `{currentPassword, newPassword}`; senha atual errada é 400 `USER_CURRENT_PASSWORD_INVALID` (4008), não 401. Encerra todas as sessões e devolve tokens novos. Rate limit 5/min |
+
+`{tipo}`: `genders`, `pronouns`, `disabilities`, `accessibility-needs`,
+`autonomy-levels`, `communication-forms`, `lifestyle-types`, `love-languages`,
+`energy-levels`, `interest-types`, `connection-types`, `community-categories`.
+O gênero 4 ("Prefiro não informar") é protegido: o discovery o referencia
+por id. `GET /users/me` devolve a identidade da conta (com `role` e `banned`).
+
+Toda ação administrativa grava em `admin_audit_log` (V32) na mesma
+transação: quem, o quê, alvo, detalhes e IP.
+
+### Pesos de pontuação
+
+Toda dimensão com peso — compatibilidade dos Encontros, ranking do feed da
+aba Início e descoberta de comunidades — é uma constante de
+`scoring/enums/ScoringDimension` (regra e valor padrão no código). O banco
+guarda só o peso (`scoring_weights`, V33) e a revisão de cada grupo
+(`scoring_group_revisions`).
+
+- **Boot:** `ScoringWeightRegistry` lê as duas tabelas e mantém uma foto
+  imutável em memória (array por ordinal da dimensão). Dimensão sem linha no
+  banco usa o padrão.
+- **Leitura:** discovery, feed e descoberta pegam a foto uma vez por
+  requisição (`current()`): nenhuma consulta ao banco para saber peso.
+- **Alteração:** o `PUT` trava a revisão do grupo, recusa com 409 quem editava
+  uma revisão antiga, valida limites (até 2 casas decimais) e, nos Encontros,
+  que as fatias em % somem exatamente 100. Grava, audita
+  (`SCORING_WEIGHTS_UPDATE`) e troca a memória logo depois do commit.
+- **Mais de uma instância:** cada réplica tem a própria memória; as outras só
+  enxergam o peso novo ao reiniciar.
+
+Gênero entra como filtro da busca e como penalidade (`MATCH_PENALTY_*`);
+pronomes e deficiências não entram em nenhuma pontuação hoje.
+
 ## Migrações
 
 O schema é versionado com Flyway em `src/main/resources/db/migration`.
@@ -95,9 +200,9 @@ DB_NAME=unify_prod_test ./mvnw quarkus:run -Dquarkus.profile=prod
 
 | Ambiente | `database.generation` | Flyway | Seed |
 |---|---|---|---|
-| `%dev` | `drop-and-create` | desligado | `import.sql` + `import-dev.sql` + `import-users.sql` |
+| `%dev` | `drop-and-create` | desligado | `import.sql` + `import-dev.sql` + `import-users.sql` + `import-posts.sql` + `import-reports.sql` + `import-admin.sql` |
 | `%test` | `drop-and-create` | desligado | `import.sql` |
-| default / prod | `validate` | `migrate-at-start=true` | apenas `V2__reference_data.sql` |
+| default / prod | `validate` | `migrate-at-start=true` | apenas `V2__reference_data.sql` (+ categorias da V4); nenhum admin semeado |
 
 Os usuários de demonstração existem **somente** em `%dev`. O `DemoSeedGuard`
 aborta o boot se dados de demonstração forem detectados fora de dev/test.

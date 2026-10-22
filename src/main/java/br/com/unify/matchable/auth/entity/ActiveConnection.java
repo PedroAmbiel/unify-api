@@ -53,6 +53,11 @@ public class ActiveConnection extends PanacheEntityBase {
         return find("refreshToken = ?1 and revoked = false", hash).firstResult();
     }
 
+    /** Também devolve conexão revogada (o refresh precisa distinguir conta banida). */
+    public static ActiveConnection findAnyByRefreshTokenHash(String hash) {
+        return find("refreshToken", hash).firstResult();
+    }
+
     public static void revokeAllForUser(User user) {
         update("revoked = true where user = ?1 and revoked = false", user);
     }

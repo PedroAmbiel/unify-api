@@ -81,8 +81,9 @@ public class CommunityMembership extends PanacheEntityBase {
                 .getResultList();
     }
 
+    /** Semana 06: membro com conta suspensa não conta nem aparece na lista. */
     public static long countByCommunity(Community community) {
-        return count("community", community);
+        return count("community = ?1 and userProfile.user.banned = false", community);
     }
 
     public static List<CommunityMembership> listByCommunity(Community community) {
@@ -91,6 +92,6 @@ public class CommunityMembership extends PanacheEntityBase {
 
     /** Ordenacao estavel para paginacao: ordem de entrada na comunidade. */
     public static PanacheQuery<CommunityMembership> queryByCommunity(Community community) {
-        return find("community = ?1 order by joinedAt asc, id asc", community);
+        return find("community = ?1 and userProfile.user.banned = false order by joinedAt asc, id asc", community);
     }
 }

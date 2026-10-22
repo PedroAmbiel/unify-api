@@ -230,6 +230,38 @@ class UserMatchDiscoveryIntegrationTest {
         assertTrue(visible.isEmpty(), "o gêmeo JPQL aplica o mesmo bloqueio");
     }
 
+    // ---------------------------------------------------------------- T8 (semana 06)
+
+    @Test
+    @TestTransaction
+    void bannedProfilesAreExcludedFromOrganicAndInboundPaths() {
+        Fixture alice = createProfile("Alice");
+        Fixture banido = createProfile("Banido");
+        Fixture convite = createProfile("Convite");
+        Fixture controle = createProfile("Controle");
+
+        // "Convite" curtiu Alice antes de ser banido: nem o convite recebido pode reaparecer.
+        userMatchService.registerDecision(convite.user(), new MatchDecisionRequest(alice.profileId(), true));
+        ban(banido.user());
+        ban(convite.user());
+        entityManager.flush();
+
+        List<UUID> feed = userMatchService.getPotentialMatches(alice.user(), NO_ALREADY_USED);
+        assertFalse(feed.contains(banido.profileId()), "conta suspensa some do discovery");
+        assertFalse(feed.contains(convite.profileId()), "conta suspensa some também como convite");
+        assertTrue(feed.contains(controle.profileId()), "controle positivo: conta ativa continua aparecendo");
+
+        List<UUID> visible = userMatchService.filterVisibleProfileIds(
+                alice.user(), List.of(banido.profileId(), convite.profileId(), controle.profileId()));
+        assertEquals(List.of(controle.profileId()), visible, "o gêmeo JPQL aplica o mesmo filtro de banimento");
+    }
+
+    private static void ban(User user) {
+        user.banned = true;
+        user.bannedAt = Instant.now();
+        user.banReason = "Banido pelo teste de discovery";
+    }
+
     private void persistBlock(User blocker, User blocked) {
         UserBlock block = new UserBlock();
         block.id = UUIDv7Generator.generate();

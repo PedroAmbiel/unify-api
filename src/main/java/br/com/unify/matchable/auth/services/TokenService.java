@@ -3,7 +3,9 @@ package br.com.unify.matchable.auth.services;
 import br.com.unify.matchable.auth.dto.TokenResponse;
 import br.com.unify.matchable.auth.entity.ActiveConnection;
 import br.com.unify.matchable.common.UUIDv7Generator;
+import br.com.unify.matchable.common.exceptions.UserBannedException;
 import br.com.unify.matchable.user.entity.User;
+import br.com.unify.matchable.user.enums.UserRole;
 import io.smallrye.jwt.build.Jwt;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -53,9 +55,21 @@ public class TokenService {
 
     public TokenResponse refreshTokens(String refreshToken, String deviceInfo, String ipAddress) {
         String tokenHash = hashToken(refreshToken);
-        ActiveConnection connection = ActiveConnection.findByRefreshTokenHash(tokenHash);
+        // Inclui conexões revogadas: o ban revoga todas, e quem volta com um
+        // refresh token emitido antes dele precisa ouvir "conta suspensa"
+        // (403 USER_DISABLED), não "sessão expirada".
+        ActiveConnection connection = ActiveConnection.findAnyByRefreshTokenHash(tokenHash);
 
         if (connection == null || connection.expiresAt.isBefore(Instant.now())) {
+            return null;
+        }
+
+        if (connection.user != null && connection.user.banned) {
+            ActiveConnection.revokeAllForUser(connection.user);
+            throw new UserBannedException(connection.user.banReason);
+        }
+
+        if (connection.revoked) {
             return null;
         }
 
@@ -77,11 +91,30 @@ public class TokenService {
     private String generateAccessToken(User user) {
         return Jwt.issuer("https://unify.com.br")
                 .subject(user.id.toString())
-                .groups(Set.of("user"))
+                .groups(resolveGroups(user))
                 .claim("name", user.name)
                 .claim("lastName", user.lastName)
+                .claim("role", resolveRole(user).name())
                 .expiresIn(Duration.ofMinutes(accessTokenExpirationMinutes))
                 .sign();
+    }
+
+    /**
+     * ADMIN acumula "user": o administrador continua usando o app e nenhum
+     * endpoint {@code @RolesAllowed("user")} quebra para ele. A claim "role"
+     * é só conveniência para o cliente; a autorização usa {@code groups}.
+     * O refresh reconstrói os grupos a partir do banco, então uma promoção
+     * passa a valer na próxima renovação do token.
+     */
+    static Set<String> resolveGroups(User user) {
+        return switch (resolveRole(user)) {
+            case ADMIN -> Set.of("user", "admin");
+            case USER -> Set.of("user");
+        };
+    }
+
+    private static UserRole resolveRole(User user) {
+        return user.role == null ? UserRole.USER : user.role;
     }
 
     private String generateRefreshToken() {

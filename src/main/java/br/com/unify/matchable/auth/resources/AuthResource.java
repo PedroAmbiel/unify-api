@@ -15,6 +15,7 @@ import br.com.unify.matchable.auth.services.TokenService;
 import br.com.unify.matchable.common.dto.ErrorResponse;
 import br.com.unify.matchable.common.dto.MessageResponse;
 import br.com.unify.matchable.common.enums.ErrorCode;
+import br.com.unify.matchable.common.exceptions.UserBannedException;
 import br.com.unify.matchable.common.filters.RateLimited;
 import br.com.unify.matchable.common.validation.EmailValidator;
 import br.com.unify.matchable.common.validation.PasswordValidator;
@@ -107,6 +108,11 @@ public class AuthResource {
         User user = servicesUser.findByEmail(request.email());
         if (user == null || !BcryptUtil.matches(request.password(), user.password)) {
             return errorResponse(ErrorCode.AUTH_INVALID_CREDENTIALS);
+        }
+        // Semana 06: conta banida não autentica. Checado DEPOIS da senha de
+        // propósito: quem não tem a credencial não descobre que a conta foi banida.
+        if (user.banned) {
+            return errorResponse(ErrorCode.USER_DISABLED, user.banReason);
         }
         if (emailVerificationService.requiresVerification(user)) {
             return errorResponse(ErrorCode.USER_EMAIL_NOT_VERIFIED);
@@ -203,11 +209,17 @@ public class AuthResource {
     public Response refresh(RefreshTokenRequest request,
                             @HeaderParam("User-Agent") String userAgent,
                             @HeaderParam("X-Forwarded-For") String forwardedFor) {
-        TokenResponse tokens = tokenService.refreshTokens(request.refreshToken(), userAgent, forwardedFor);
-        if (tokens == null) {
-            return errorResponse(ErrorCode.TOKEN_REFRESH_INVALID_OR_EXPIRED);
+        try {
+            TokenResponse tokens = tokenService.refreshTokens(request.refreshToken(), userAgent, forwardedFor);
+            if (tokens == null) {
+                return errorResponse(ErrorCode.TOKEN_REFRESH_INVALID_OR_EXPIRED);
+            }
+            return Response.ok(tokens).build();
+        } catch (UserBannedException exception) {
+            // Capturada aqui (e não no mapper global) para a transação COMMITAR a
+            // revogação das sessões feita pelo TokenService.
+            return errorResponse(ErrorCode.USER_DISABLED, exception.getBanReason());
         }
-        return Response.ok(tokens).build();
     }
 
     @POST

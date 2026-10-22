@@ -271,40 +271,45 @@ public class UserProfileServiceImplementation implements UserProfileService {
         );
     }
 
+    /**
+     * Só itens ATIVOS (semana 06): desativar pelo backoffice tira a opção da
+     * tela de edição, mas a leitura de perfis que já usam o item não filtra
+     * por {@code active} — nada se perde.
+     */
     @Override
     public ProfileOptionsResponse getProfileOptions() {
         return new ProfileOptionsResponse(
-                Gender.<Gender>listAll(Sort.by("id")).stream()
+                Gender.<Gender>list("active = true", Sort.by("id")).stream()
                         .map(gender -> toOption(gender.id, gender.description))
                         .toList(),
-            Pronoun.<Pronoun>listAll(Sort.by("id")).stream()
+            Pronoun.<Pronoun>list("active = true", Sort.by("id")).stream()
                 .map(pronoun -> toOption(pronoun.id, pronoun.description))
                 .toList(),
-                Disability.<Disability>listAll(Sort.by("id")).stream()
+                Disability.<Disability>list("active = true", Sort.by("id")).stream()
                         .map(disability -> new DisabilityOptionResponse(disability.id, disability.description, disability.ionicIcon))
                         .toList(),
-                AccessibilityNeed.<AccessibilityNeed>listAll(Sort.by("id")).stream()
+                AccessibilityNeed.<AccessibilityNeed>list("active = true", Sort.by("id")).stream()
                         .map(need -> toOption(need.id, need.description))
                         .toList(),
-                AutonomyLevel.<AutonomyLevel>listAll(Sort.by("id")).stream()
+                AutonomyLevel.<AutonomyLevel>list("active = true", Sort.by("id")).stream()
                         .map(level -> toOption(level.id, level.description))
                         .toList(),
-                CommunicationForm.<CommunicationForm>listAll(Sort.by("id")).stream()
+                CommunicationForm.<CommunicationForm>list("active = true", Sort.by("id")).stream()
                         .map(form -> toOption(form.id, form.description))
                         .toList(),
-                LifestyleType.<LifestyleType>listAll(Sort.by("id")).stream()
+                LifestyleType.<LifestyleType>list("active = true", Sort.by("id")).stream()
                         .map(type -> toOption(type.id, type.description))
                         .toList(),
-                LoveLanguage.<LoveLanguage>listAll(Sort.by("id")).stream()
+                LoveLanguage.<LoveLanguage>list("active = true", Sort.by("id")).stream()
                     .map(type -> toOption(type.id, type.description))
                     .toList(),
-                EnergyLevel.<EnergyLevel>listAll(Sort.by("id")).stream()
+                EnergyLevel.<EnergyLevel>list("active = true", Sort.by("id")).stream()
                         .map(level -> toOption(level.id, level.description))
                         .toList(),
-                InterestType.<InterestType>listAll(Sort.by("id")).stream()
+                InterestType.<InterestType>list("active = true", Sort.by("id")).stream()
                         .map(type -> toOption(type.id, type.description))
                         .toList(),
-                ConnectionType.<ConnectionType>listAll(Sort.by("id")).stream()
+                ConnectionType.<ConnectionType>list("active = true", Sort.by("id")).stream()
                         .map(type -> toOption(type.id, type.description))
                         .toList(),
                 List.of(
@@ -713,7 +718,7 @@ public class UserProfileServiceImplementation implements UserProfileService {
         }
 
         UserProfile profile = UserProfile.findById(userProfileId);
-        if (profile == null || profile.user == null || !profile.user.verified) {
+        if (profile == null || profile.user == null || !profile.user.verified || profile.user.banned) {
             throw new NoSuchElementException(PUBLIC_PROFILE_NOT_FOUND_MESSAGE);
         }
         if (viewer != null

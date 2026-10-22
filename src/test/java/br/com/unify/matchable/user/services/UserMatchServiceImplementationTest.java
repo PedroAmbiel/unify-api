@@ -13,6 +13,9 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import br.com.unify.matchable.scoring.enums.ScoringDimension;
+import br.com.unify.matchable.scoring.enums.ScoringGroup;
+import br.com.unify.matchable.scoring.services.ScoringWeights;
 import br.com.unify.matchable.user.entity.AccessibilityNeed;
 import br.com.unify.matchable.user.entity.AutonomyLevel;
 import br.com.unify.matchable.user.entity.CommunicationForm;
@@ -285,8 +288,59 @@ class UserMatchServiceImplementationTest {
                 buildCurrentProfile(), friendship, 29,
                 buildCompatibleCandidateProfile(), relationship, 28, 6d);
 
-        assertEquals(MatchScoringPolicy.WEIGHT_CONNECTION_TYPE / 2d, exact - partial, 0.01d);
-        assertEquals(MatchScoringPolicy.WEIGHT_CONNECTION_TYPE, exact - incompatible, 0.01d);
+        double connectionWeight = ScoringDimension.MATCH_CONNECTION_TYPE.defaultWeight();
+        assertEquals(connectionWeight / 2d, exact - partial, 0.01d);
+        assertEquals(connectionWeight, exact - incompatible, 0.01d);
+    }
+
+    @Test
+    @DisplayName("Penalidades vêm dos pesos vigentes (backoffice), não de constante")
+    void penaltiesComeFromCurrentWeights() {
+        UserMatchServiceImplementation service = new UserMatchServiceImplementation();
+        ScoringWeights custom = ScoringWeights.defaults().withGroup(ScoringGroup.MATCH, 1, Map.of(
+                ScoringDimension.MATCH_PENALTY_GENDER_NOT_RECIPROCAL, 20d,
+                ScoringDimension.MATCH_PENALTY_AGE_NOT_RECIPROCAL, 0d));
+
+        double neutral = service.calculateCompatibilityScore(
+                buildCurrentProfile(), buildCurrentPreference(), 29,
+                buildCompatibleCandidateProfile(), buildCompatibleCandidatePreference(), 28,
+                6d, UserMatchServiceImplementation.ScoringContext.empty(), custom);
+        double penalized = service.calculateCompatibilityScore(
+                buildCurrentProfile(), buildCurrentPreference(), 29,
+                buildCompatibleCandidateProfile(), buildCompatibleCandidatePreference(), 28,
+                6d, new UserMatchServiceImplementation.ScoringContext(true, true, false), custom);
+
+        assertEquals(20d, neutral - penalized, 0.01d); // 20 do gênero + 0 da idade
+    }
+
+    @Test
+    @DisplayName("Fatia zerada no backoffice tira a dimensão da conta")
+    void zeroWeightTakesTheDimensionOutOfTheScore() {
+        UserMatchServiceImplementation service = new UserMatchServiceImplementation();
+        // Distância 4 -> 0 e comunicação 22 -> 26: as fatias continuam somando 100.
+        ScoringWeights withoutDistance = ScoringWeights.defaults().withGroup(ScoringGroup.MATCH, 1, Map.of(
+                ScoringDimension.MATCH_DISTANCE, 0d,
+                ScoringDimension.MATCH_COMMUNICATION, 26d));
+        assertEquals(100d, withoutDistance.percentTotal(ScoringGroup.MATCH), 0.0001d);
+
+        double near = service.calculateCompatibilityScore(
+                buildCurrentProfile(), buildCurrentPreference(), 29,
+                buildCompatibleCandidateProfile(), buildCompatibleCandidatePreference(), 28,
+                5d, UserMatchServiceImplementation.ScoringContext.empty(), withoutDistance);
+        double far = service.calculateCompatibilityScore(
+                buildCurrentProfile(), buildCurrentPreference(), 29,
+                buildCompatibleCandidateProfile(), buildCompatibleCandidatePreference(), 28,
+                110d, UserMatchServiceImplementation.ScoringContext.empty(), withoutDistance);
+        assertEquals(near, far, 0.0001d);
+
+        // Com os padrões a mesma distância pesa.
+        double nearDefault = service.calculateCompatibilityScore(
+                buildCurrentProfile(), buildCurrentPreference(), 29,
+                buildCompatibleCandidateProfile(), buildCompatibleCandidatePreference(), 28, 5d);
+        double farDefault = service.calculateCompatibilityScore(
+                buildCurrentProfile(), buildCurrentPreference(), 29,
+                buildCompatibleCandidateProfile(), buildCompatibleCandidatePreference(), 28, 110d);
+        assertTrue(nearDefault > farDefault, nearDefault + " deveria ser maior que " + farDefault);
     }
 
     @Test

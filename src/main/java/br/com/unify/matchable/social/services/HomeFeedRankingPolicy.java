@@ -3,8 +3,11 @@ package br.com.unify.matchable.social.services;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
+import br.com.unify.matchable.scoring.enums.ScoringDimension;
+import br.com.unify.matchable.scoring.services.ScoringWeights;
 import br.com.unify.matchable.social.enums.FeedSource;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
@@ -35,49 +38,30 @@ import jakarta.persistence.Query;
  *       nunca entram ({@link Context#hiddenAuthorUserIds()}); post pessoal
  *       de quem restringiu a seguidores só entra se eu sigo o autor
  *       ({@link #authorVisibilityFilter()}).</li>
+ *   <li>Banimento (semana 06): post de conta suspensa nunca entra.</li>
  * </ul>
  *
  * <p>Toda a pontuação é calculada no Postgres (query nativa), então a paginação
  * por offset é consistente entre páginas e o custo por página não cresce com
- * o número de páginas já vistas. Os pesos são as constantes abaixo; mudar um
- * peso não muda o contrato da API.
+ * o número de páginas já vistas. Os pesos são as dimensões {@code FEED_*} de
+ * {@link ScoringDimension} (administráveis pelo backoffice) e entram na query
+ * como parâmetros; mudar um peso não muda o contrato da API nem o SQL.
+ *
+ * <pre>
+ * fonte        FEED_FOLLOWING (post pessoal de quem eu sigo)
+ *              FEED_MEMBER_COMMUNITY (comunidade em que sou membro)
+ *              FEED_FOLLOWED_AUTHOR_IN_COMMUNITY (pública, não membro, autor que eu sigo)
+ * perfil       FEED_SHARED_INTEREST por interesse em comum, até FEED_SHARED_INTERESTS_CAP
+ * comunidade   FEED_SAME_CATEGORY + FEED_FEATURED_COMMUNITY
+ *              + FEED_FOLLOWED_MEMBER por pessoa que sigo e é membro, até FEED_FOLLOWED_MEMBERS_CAP
+ * engajamento  FEED_LIKE por curtida + FEED_COMMENT por comentário, até FEED_ENGAGEMENT_CAP
+ * recência     FEED_RECENCY / (1 + idade em horas / FEED_RECENCY_HALF_LIFE_HOURS)
+ * </pre>
  */
 public final class HomeFeedRankingPolicy {
 
     private HomeFeedRankingPolicy() {
     }
-
-    // ---- Peso da fonte --------------------------------------------------
-    /** Post pessoal de quem eu sigo. */
-    public static final double WEIGHT_FOLLOWING = 60d;
-    /** Post de comunidade em que sou membro. */
-    public static final double WEIGHT_MEMBER_COMMUNITY = 50d;
-    /** Post de comunidade pública (não membro) escrito por alguém que eu sigo. */
-    public static final double WEIGHT_FOLLOWED_AUTHOR_IN_COMMUNITY = 25d;
-
-    // ---- Afinidade: perfis sugeridos ---------------------------------------
-    /** Por interesse em comum entre o autor e eu ({@code user_profile_interest_types}). */
-    public static final double WEIGHT_SHARED_INTEREST = 15d;
-    public static final double CAP_SHARED_INTERESTS = 45d;
-
-    // ---- Afinidade: comunidades sugeridas ----------------------------------
-    /** Categoria igual à de alguma comunidade em que já participo. */
-    public static final double WEIGHT_SAME_CATEGORY = 20d;
-    /** Comunidade marcada como destaque. */
-    public static final double WEIGHT_FEATURED_COMMUNITY = 5d;
-    /** Por pessoa que eu sigo e que é membro da comunidade. */
-    public static final double WEIGHT_FOLLOWED_MEMBER = 10d;
-    public static final double CAP_FOLLOWED_MEMBERS = 30d;
-
-    // ---- Engajamento (vale para todas as fontes) ----------------------------
-    public static final double WEIGHT_LIKE = 2d;
-    public static final double WEIGHT_COMMENT = 4d;
-    public static final double CAP_ENGAGEMENT = 30d;
-
-    // ---- Recência ------------------------------------------------------------
-    /** Pontos de uma publicação recém-criada; cai pela metade a cada {@link #RECENCY_HALF_LIFE_HOURS}. */
-    public static final double WEIGHT_RECENCY = 40d;
-    public static final double RECENCY_HALF_LIFE_HOURS = 48d;
 
     /** UUID que nunca existe: mantém {@code in (...)} válido quando a lista vem vazia. */
     static final UUID NO_MATCH_ID = new UUID(0L, 0L);
@@ -129,8 +113,11 @@ public final class HomeFeedRankingPolicy {
     /**
      * Executa o ranking e devolve {@code limit} linhas a partir de {@code offset},
      * já na ordem do feed (score desc, mais recente primeiro em empate).
+     *
+     * @param weights foto dos pesos vigentes ({@code ScoringWeightRegistry.current()}).
      */
-    public static List<RankedPost> rank(EntityManager entityManager, Context context, int offset, int limit) {
+    public static List<RankedPost> rank(
+            EntityManager entityManager, Context context, ScoringWeights weights, int offset, int limit) {
         Query query = entityManager.createNativeQuery(SQL)
                 .setParameter("currentUserId", context.currentUserId())
                 .setParameter("followedUserIds", uuidsOrSentinel(context.followedUserIds()))
@@ -140,6 +127,7 @@ public final class HomeFeedRankingPolicy {
                 .setParameter("hiddenAuthorUserIds", uuidsOrSentinel(context.hiddenAuthorUserIds()))
                 .setFirstResult(offset)
                 .setMaxResults(limit);
+        bindWeights(query, weights);
 
         @SuppressWarnings("unchecked")
         List<Object[]> rows = query.getResultList();
@@ -161,11 +149,32 @@ public final class HomeFeedRankingPolicy {
         return ids == null || ids.isEmpty() ? List.of(NO_MATCH_LOOKUP_ID) : ids;
     }
 
+    /** Parâmetro do SQL → dimensão. Os nomes batem com os {@code :parâmetros} de {@link #SQL}. */
+    static final Map<String, ScoringDimension> WEIGHT_PARAMETERS = Map.ofEntries(
+            Map.entry("weightFollowing", ScoringDimension.FEED_FOLLOWING),
+            Map.entry("weightMemberCommunity", ScoringDimension.FEED_MEMBER_COMMUNITY),
+            Map.entry("weightFollowedAuthorInCommunity", ScoringDimension.FEED_FOLLOWED_AUTHOR_IN_COMMUNITY),
+            Map.entry("weightSharedInterest", ScoringDimension.FEED_SHARED_INTEREST),
+            Map.entry("capSharedInterests", ScoringDimension.FEED_SHARED_INTERESTS_CAP),
+            Map.entry("weightSameCategory", ScoringDimension.FEED_SAME_CATEGORY),
+            Map.entry("weightFeaturedCommunity", ScoringDimension.FEED_FEATURED_COMMUNITY),
+            Map.entry("weightFollowedMember", ScoringDimension.FEED_FOLLOWED_MEMBER),
+            Map.entry("capFollowedMembers", ScoringDimension.FEED_FOLLOWED_MEMBERS_CAP),
+            Map.entry("weightLike", ScoringDimension.FEED_LIKE),
+            Map.entry("weightComment", ScoringDimension.FEED_COMMENT),
+            Map.entry("capEngagement", ScoringDimension.FEED_ENGAGEMENT_CAP),
+            Map.entry("weightRecency", ScoringDimension.FEED_RECENCY),
+            Map.entry("recencyHalfLifeHours", ScoringDimension.FEED_RECENCY_HALF_LIFE_HOURS));
+
+    private static void bindWeights(Query query, ScoringWeights weights) {
+        WEIGHT_PARAMETERS.forEach((parameter, dimension) -> query.setParameter(parameter, weights.get(dimension)));
+    }
+
     /**
      * Uma query só: elegibilidade no {@code where}, fonte e score no
-     * {@code select}. Os pesos entram como literais (constantes acima), os
-     * ids como parâmetros. {@code now()} é fixo dentro da transação, o que
-     * mantém a paginação estável durante a mesma requisição.
+     * {@code select}. Pesos e ids entram como parâmetros (o texto do SQL não
+     * muda quando o backoffice troca um peso). {@code now()} é fixo dentro da
+     * transação, o que mantém a paginação estável durante a mesma requisição.
      */
     static final String SQL = String.format(Locale.ROOT, """
             select p.id as post_id,
@@ -177,27 +186,27 @@ public final class HomeFeedRankingPolicy {
                    end as feed_source,
                    (
                        case
-                           when p.origin = 'PERSONAL' and p.fk_user in (:followedUserIds) then %5$s
-                           when p.origin = 'COMMUNITY' and p.fk_community in (:memberCommunityIds) then %6$s
-                           when p.origin = 'COMMUNITY' and p.fk_user in (:followedUserIds) then %7$s
+                           when p.origin = 'PERSONAL' and p.fk_user in (:followedUserIds) then :weightFollowing
+                           when p.origin = 'COMMUNITY' and p.fk_community in (:memberCommunityIds) then :weightMemberCommunity
+                           when p.origin = 'COMMUNITY' and p.fk_user in (:followedUserIds) then :weightFollowedAuthorInCommunity
                            else 0
                        end
                        + case
-                           when p.origin = 'PERSONAL' then least(%9$s, %8$s * (
+                           when p.origin = 'PERSONAL' then least(:capSharedInterests, :weightSharedInterest * (
                                select count(*) from user_profile_interest_types i
                                where i.fk_user_profile = ap.id and i.fk_interest_type in (:interestTypeIds)))
                            else
-                               (case when c.fk_category in (:communityCategoryIds) then %10$s else 0 end)
-                               + (case when c.featured then %11$s else 0 end)
-                               + least(%13$s, %12$s * (
+                               (case when c.fk_category in (:communityCategoryIds) then :weightSameCategory else 0 end)
+                               + (case when c.featured then :weightFeaturedCommunity else 0 end)
+                               + least(:capFollowedMembers, :weightFollowedMember * (
                                    select count(*) from community_memberships m
                                    join user_profiles mp on mp.id = m.fk_user_profile
                                    where m.fk_community = c.id and mp.fk_user in (:followedUserIds)))
                        end
-                       + least(%16$s,
-                           %14$s * (select count(*) from post_likes l where l.fk_post = p.id)
-                           + %15$s * (select count(*) from post_comments cm where cm.fk_post = p.id and cm.active = true))
-                       + %17$s / (1 + greatest(0, extract(epoch from (now() - p.created_at)) / 3600.0) / %18$s)
+                       + least(:capEngagement,
+                           :weightLike * (select count(*) from post_likes l where l.fk_post = p.id)
+                           + :weightComment * (select count(*) from post_comments cm where cm.fk_post = p.id and cm.active = true))
+                       + :weightRecency / (1 + greatest(0, extract(epoch from (now() - p.created_at)) / 3600.0) / :recencyHalfLifeHours)
                    ) as score,
                    p.created_at
             from posts p
@@ -206,31 +215,18 @@ public final class HomeFeedRankingPolicy {
             where p.active = true
               and not (p.origin = 'PERSONAL' and p.fk_user = :currentUserId)
               and p.fk_user not in (:hiddenAuthorUserIds)
+              and not exists (select 1 from users bu where bu.id = p.fk_user and bu.banned = true)
               and (
                   p.origin = 'PERSONAL'
                   or (c.active = true and (c.privacy = 'PUBLIC' or c.id in (:memberCommunityIds)))
               )
-              and (%19$s)
+              and (%5$s)
             order by score desc, p.created_at desc, p.id desc
             """,
             FeedSource.FOLLOWING.name(),
             FeedSource.MEMBER_COMMUNITY.name(),
             FeedSource.SUGGESTED_PROFILE.name(),
             FeedSource.SUGGESTED_COMMUNITY.name(),
-            WEIGHT_FOLLOWING,
-            WEIGHT_MEMBER_COMMUNITY,
-            WEIGHT_FOLLOWED_AUTHOR_IN_COMMUNITY,
-            WEIGHT_SHARED_INTEREST,
-            CAP_SHARED_INTERESTS,
-            WEIGHT_SAME_CATEGORY,
-            WEIGHT_FEATURED_COMMUNITY,
-            WEIGHT_FOLLOWED_MEMBER,
-            CAP_FOLLOWED_MEMBERS,
-            WEIGHT_LIKE,
-            WEIGHT_COMMENT,
-            CAP_ENGAGEMENT,
-            WEIGHT_RECENCY,
-            RECENCY_HALF_LIFE_HOURS,
             authorVisibilityFilter()
     );
 }

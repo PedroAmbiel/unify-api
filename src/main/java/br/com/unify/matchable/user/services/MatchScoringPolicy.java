@@ -1,31 +1,23 @@
 package br.com.unify.matchable.user.services;
 
 /**
- * Tabela de pesos e constantes do algoritmo de compatibilidade do Unify.
+ * Constantes do algoritmo de compatibilidade do Unify.
  *
- * Regra de ouro: a soma de TODOS os pesos deve ser exatamente 100. O score final
- * é normalizado pelos pesos efetivamente avaliáveis (ver
+ * Os PESOS de cada dimensão e das penalidades não moram mais aqui: são
+ * administráveis pelo backoffice (ScoringDimension MATCH_*, padrão no próprio
+ * enum, valor vigente em ScoringWeightRegistry). Regra de ouro mantida pela
+ * validação do backoffice: as fatias somam exatamente 100. O score final é
+ * normalizado pelos pesos efetivamente avaliáveis (ver
  * UserMatchServiceImplementation.calculateCompatibilityScore), de modo que perfis
  * incompletos não ganhem nem percam pontos "de graça".
+ *
+ * O que fica aqui são as curvas e frações de cada fator: mudam a regra, não o
+ * peso, e por isso continuam sendo código.
  */
 public final class MatchScoringPolicy {
 
     private MatchScoringPolicy() {
     }
-
-    // ---- Pesos (soma = 100) --------------------------------------------
-    public static final double WEIGHT_COMMUNICATION = 22d;
-    public static final double WEIGHT_INTERESTS = 18d;
-    public static final double WEIGHT_CONNECTION_TYPE = 12d;
-    public static final double WEIGHT_ACCESSIBILITY_NEEDS = 12d;
-    public static final double WEIGHT_LIFESTYLE = 10d;
-    public static final double WEIGHT_AUTONOMY = 8d;
-    public static final double WEIGHT_LOVE_LANGUAGE = 6d;
-    public static final double WEIGHT_ENERGY = 5d;
-    public static final double WEIGHT_DISTANCE = 4d;
-    public static final double WEIGHT_AGE_DIFFERENCE = 3d;
-
-    public static final double TOTAL_WEIGHT = 100d;
 
     // ---- Comunicação ----------------------------------------------------
     /** Fração do peso concedida assim que existe pelo menos UM canal em comum. */
@@ -51,14 +43,6 @@ public final class MatchScoringPolicy {
     // ---- Idade (curva contínua) -----------------------------------------
     public static final int AGE_FULL_SCORE_YEARS = 3;
     public static final int AGE_ZERO_SCORE_YEARS = 20;
-
-    // ---- Penalidades (aplicadas após a normalização) --------------------
-    /** A preferência de gênero do candidato exclui o usuário atual. */
-    public static final double PENALTY_GENDER_NOT_RECIPROCAL = 8d;
-    /** A faixa etária do candidato exclui o usuário atual. */
-    public static final double PENALTY_AGE_NOT_RECIPROCAL = 5d;
-    /** Perfil que já foi recusado e voltou após o cooldown. */
-    public static final double PENALTY_RESHOWN_AFTER_COOLDOWN = 10d;
 
     // ---- Confiança -------------------------------------------------------
     /** Abaixo desta cobertura de pesos o score é considerado pouco confiável. */
